@@ -9,7 +9,7 @@ from strategy_engine import market_regime, evaluate_symbol, best_signal
 from backtest import run_backtest
 
 IST=ZoneInfo("Asia/Kolkata")
-st.set_page_config(page_title="HT NEXUS PRO", page_icon="📈", layout="wide",
+st.set_page_config(page_title="HT NEXUS", page_icon="📈", layout="wide",
                    initial_sidebar_state="collapsed")
 st.markdown("""
 <style>
@@ -19,7 +19,7 @@ st.markdown("""
 @media(max-width:700px){.block-container{padding-left:1rem;padding-right:1rem}}
 </style>
 """,unsafe_allow_html=True)
-st.title("📈 HT NEXUS PRO")
+st.title("📈 HT NEXUS")
 st.caption("BTST • Swing Trading • DhanHQ Data • Signals only — no automatic orders")
 
 with st.sidebar:
@@ -37,9 +37,8 @@ with st.sidebar:
     universe_text=st.text_area("NSE symbols", value="RELIANCE,2885,ENERGY\nTCS,11536,IT\nINFY,1594,IT\nHDFCBANK,1333,BANK\nICICIBANK,4963,BANK\nSBIN,3045,BANK\nLT,11483,INDUSTRIALS\nITC,1660,FMCG\nAXISBANK,5900,BANK\nBHARTIARTL,10604,TELECOM",height=190)
     st.caption("Edit IDs/sectors against Dhan's current instrument master before live use.")
     st.markdown("**Sector index proxies** (`SECTOR,SECURITY_ID`)")
-    sector_text = st.text_area("Sector proxies", value="BANK,\\nIT,", height=90,
+    sector_text = st.text_area("Sector proxies", value="", height=90,
                                help="Replace with verified Dhan index IDs, e.g. BANKNIFTY and NIFTY IT proxy IDs.")
-    sector_text = sector_text.replace("IT,ಂತೆ", "IT,")
     sector_map = {}
     for line in sector_text.splitlines():
         bits = [v.strip() for v in line.split(",")]
