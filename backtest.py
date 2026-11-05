@@ -40,19 +40,14 @@ def _signal_at(intra: pd.DataFrame, daily: pd.DataFrame, regime: dict, strategy:
         side = "SHORT"
     if side is None:
         return None
-    if side == "LONG" and regime["regime"] == "BEARISH":
-        return None
-    if side == "SHORT" and regime["regime"] == "BULLISH":
-        return None
-    if strategy == "BTST" and regime["regime"] == "NEUTRAL":
-        return None
+    # Stock-only backtest: no NIFTY/index regime filter is applied.
     daily_last = d.iloc[-1]
-    daily_ok = (daily_last.close > daily_last.ema20 > daily_last.ema50 > daily_last.ema200
+    daily_ok = (daily_last.close > daily_last.ema20 > daily_last.ema50
                 if side == "LONG" else
-                daily_last.close < daily_last.ema20 < daily_last.ema50 < daily_last.ema200)
+                daily_last.close < daily_last.ema20 < daily_last.ema50)
     if not daily_ok or not np.isfinite(last.atr14) or last.atr14 <= 0:
         return None
-    if not (last.volume_ratio >= 1.5 and
+    if not (last.volume_ratio >= 1.2 and
             (last.close > last.vwap if side == "LONG" else last.close < last.vwap)):
         return None
     if side == "LONG":

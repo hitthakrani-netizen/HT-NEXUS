@@ -59,8 +59,8 @@ def _daily_confirmation(daily: pd.DataFrame, side: str) -> bool:
         return False
     x = d.iloc[-1]
     if side == "LONG":
-        return bool(x.close > x.ema20 > x.ema50 and x.ema50 > x.ema200 and x.rsi14 >= 50)
-    return bool(x.close < x.ema20 < x.ema50 and x.ema50 < x.ema200 and x.rsi14 <= 50)
+        return bool(x.close > x.ema20 > x.ema50 and x.rsi14 >= 50)
+    return bool(x.close < x.ema20 < x.ema50 and x.rsi14 <= 50)
 
 
 def _intraday_checks(intraday: pd.DataFrame, side: str):
@@ -87,7 +87,7 @@ def _intraday_checks(intraday: pd.DataFrame, side: str):
         trend_ok = bool(last.close < last.ema20 < last.ema50)
         momentum_ok = bool(last.rsi14 <= 48 and last.macd < last.macd_signal)
         vwap_ok = bool(last.close < last.vwap)
-    volume_ok = bool(last.volume_ratio >= 1.5)
+    volume_ok = bool(last.volume_ratio >= 1.2)
     # 15-minute close confirmation prevents acting on an unfinished aggregate.
     fifteen = add_indicators(resample_ohlcv(intraday, "15min"))
     if len(fifteen) < 55:
@@ -127,12 +127,7 @@ def evaluate_symbol(
     # Score both directions; regime must not oppose the signal.
     candidates = []
     for side in ("LONG", "SHORT"):
-        if side == "LONG" and regime.get("regime") == "BEARISH":
-            continue
-        if side == "SHORT" and regime.get("regime") == "BULLISH":
-            continue
-        if strategy == "BTST" and regime.get("regime") == "NEUTRAL":
-            continue
+        # Stock-only logic: never gate a stock setup using NIFTY/index direction.
         if not _daily_confirmation(daily, side):
             continue
         checks = _intraday_checks(intraday, side)
@@ -158,13 +153,26 @@ def evaluate_symbol(
         stop = entry - stop_distance if side == "LONG" else entry + stop_distance
         target = entry + target_distance if side == "LONG" else entry - target_distance
         rr = target_distance / stop_distance
-        score = 6 + (1 if regime.get("regime") == ("BULLISH" if side == "LONG" else "BEARISH") else 0)
+
+        # Rank passing setups by measurable signal quality instead of assigning
+        # every candidate the same fixed score.
+        trend_strength = min(2.0, abs(float(last.ema20 - last.ema50)) / entry * 100 * 8)
+        rsi_strength = min(1.5, abs(float(last.rsi14) - 50) / 15)
+        volume_strength = min(1.5, max(0.0, min(float(last.volume_ratio), 3.0) - 1.0) * 0.75)
+        breakout_level = float(last.breakout_level if side == "LONG" else last.breakdown_level)
+        breakout_strength = min(1.5, abs(entry - breakout_level) / atr_value * 3)
+        mtf = add_indicators(resample_ohlcv(intraday, "15min")).iloc[-1]
+        mtf_strength = min(1.0, abs(float(mtf.close - mtf.ema20)) / max(entry, 1e-9) * 100 * 10)
+        score = 5.0 + trend_strength + rsi_strength + volume_strength + breakout_strength + mtf_strength
         if sector_relative_strength is not None:
             score += min(1.0, abs(float(sector_relative_strength)) * 10)
+        score = round(float(score), 2)
         reasons = (
             f"Daily trend confirmed; intraday EMA trend, RSI/MACD, VWAP, "
-            f"15-minute confirmation, 1.5x volume and false-breakout guard passed. "
-            f"Market regime: {regime.get('regime', 'UNKNOWN')}."
+            f"15-minute confirmation, relative volume and false-breakout guard passed. "
+            f"Quality score uses trend separation, RSI strength, relative volume, "
+            f"breakout distance and 15-minute EMA separation. "
+            f"Signal is based on this stock's own price/volume data; no NIFTY filter."
         )
         candidates.append({
             "symbol": symbol, "side": side, "strategy": strategy,
