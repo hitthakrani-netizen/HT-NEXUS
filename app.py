@@ -42,10 +42,18 @@ section[data-testid="stSidebar"] { min-width: 290px; }
 st.title("📈 HT NEXUS")
 st.caption("NSE STOCK-ONLY • BTST + SWING • DhanHQ data • Signals only — no auto orders")
 
+def _secret_or_env(key: str) -> str:
+    """Read optional Streamlit secret safely; fall back to environment."""
+    try:
+        value = st.secrets.get(key, "")
+    except Exception:
+        value = ""
+    return str(value or os.getenv(key, ""))
+
 with st.sidebar:
     st.subheader("Configuration")
-    client_id=st.text_input("Dhan Client ID", value=st.secrets.get("DHAN_CLIENT_ID", os.getenv("DHAN_CLIENT_ID","")))
-    token=st.text_input("Dhan Access Token", value=st.secrets.get("DHAN_ACCESS_TOKEN", os.getenv("DHAN_ACCESS_TOKEN","")), type="password")
+    client_id=st.text_input("Dhan Client ID", value=_secret_or_env("DHAN_CLIENT_ID"))
+    token=st.text_input("Dhan Access Token", value=_secret_or_env("DHAN_ACCESS_TOKEN"), type="password")
     strategy=st.selectbox("Strategy",["BTST","SWING"])
     interval=st.selectbox("Intraday candle interval (minutes)",["5","15","1"],index=0)
     lookback=st.slider("Intraday history (days)",7,90,30)
