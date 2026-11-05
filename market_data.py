@@ -121,8 +121,8 @@ class DhanDataClient:
         self.session.headers.update({
             "Accept": "application/json",
             "Content-Type": "application/json",
+            # DhanHQ v2 documents access-token as the authentication header.
             "access-token": self.access_token,
-            "client-id": self.client_id,
         })
         self._last_quote_request = 0.0
 
@@ -132,16 +132,19 @@ class DhanDataClient:
             response = self.session.post(url, json=payload, timeout=self.timeout)
         except requests.RequestException as exc:
             raise DhanAPIError(f"Network error calling {path}: {exc}") from exc
-        if response.status_code in (401, 403):
-            raise DhanAPIError(
-                f"Dhan rejected {path} (HTTP {response.status_code}). Verify Client ID/token "
-                "and confirm Data API subscription/permissions are active. Trading API access "
-                "alone does not imply Data API access."
-            )
         try:
             body = response.json()
         except ValueError:
             body = {"raw": response.text[:500]}
+        if response.status_code in (401, 403):
+            detail = ""
+            if isinstance(body, dict):
+                detail = body.get("errorMessage") or body.get("message") or body.get("errorCode") or body.get("raw", "")
+            raise DhanAPIError(
+                f"Dhan rejected {path} (HTTP {response.status_code}). "
+                f"{detail or 'Check that the access token is current and Data API access is active.'} "
+                "The Dhan Web access token is valid for 24 hours; regenerate it if expired."
+            )
         if not response.ok:
             msg = body.get("errorMessage", body.get("message", body.get("raw", response.text[:300])))
             raise DhanAPIError(f"Dhan HTTP {response.status_code} on {path}: {msg}")
@@ -149,6 +152,24 @@ class DhanDataClient:
             raise DhanAPIError(f"Dhan API failure on {path}: {body}")
         if isinstance(body, dict) and (body.get("errorCode") or body.get("errorType")):
             raise DhanAPIError(f"Dhan API error on {path}: {body}")
+        return body
+
+    def profile(self) -> dict:
+        """Validate the access token and return Dhan's non-sensitive account/API status."""
+        url = f"{self.base_url}/profile"
+        try:
+            response = self.session.get(url, timeout=self.timeout)
+        except requests.RequestException as exc:
+            raise DhanAPIError(f"Network error calling /profile: {exc}") from exc
+        try:
+            body = response.json()
+        except ValueError:
+            body = {"raw": response.text[:300]}
+        if not response.ok:
+            detail = body.get("errorMessage") or body.get("message") or body.get("errorCode") or body.get("raw", "")
+            raise DhanAPIError(f"Dhan profile check failed (HTTP {response.status_code}): {detail}")
+        if not isinstance(body, dict) or not body.get("dhanClientId"):
+            raise DhanAPIError(f"Unexpected Dhan profile response: {body}")
         return body
 
     @staticmethod
