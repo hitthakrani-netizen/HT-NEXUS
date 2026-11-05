@@ -75,14 +75,15 @@ if st.button("🔍 Scan NSE Stocks",type="primary"):
 
 if "stock_signals" in st.session_state:
     signals=st.session_state["stock_signals"]
-    st.subheader("Confirmed NSE Stock Signals")
+    st.subheader("Single Strongest NSE Stock Signal")
     if signals:
-        df=pd.DataFrame([{"Stock":x["symbol"],"Strategy":x["strategy"],"Side":x["side"],"Entry":round(x["entry"],2),"Stop Loss":round(x["stop_loss"],2),"Target":round(x["target"],2),"R:R":round(x["risk_reward"],2),"Score":x["score"],"Sector":x.get("sector","")} for x in signals])
+        # Keep exactly one highest-scoring qualifying stock; never mix weaker signals.
+        best=max(signals,key=lambda x:(float(x.get("score",0)),float(x.get("risk_reward",0))))
+        df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target":round(best["target"],2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Sector":best.get("sector","")}])
         st.dataframe(df,use_container_width=True,hide_index=True)
-        for x in signals:
-            with st.expander(f"{x['symbol']} — {x['side']} — Score {x['score']}"):
-                st.write(x["reasons"])
-                st.write(f"Entry ₹{x['entry']:.2f} | SL ₹{x['stop_loss']:.2f} | Target ₹{x['target']:.2f} | R:R 1:{x['risk_reward']:.2f}")
+        st.write(best["reasons"])
+        st.write(f"**Best setup:** {best['symbol']} | Entry ₹{best['entry']:.2f} | SL ₹{best['stop_loss']:.2f} | Target ₹{best['target']:.2f} | R:R 1:{best['risk_reward']:.2f}")
+        st.caption(f"Selected as the strongest among {len(signals)} qualifying stock signals. This is a stock signal only; CALL/PUT option details are not yet enabled.")
     else:
         st.warning("No stock passed the confirmation rules in this scan. This is a genuine NO TRADE result, not an index signal.")
     if st.session_state.get("stock_diagnostics"):
