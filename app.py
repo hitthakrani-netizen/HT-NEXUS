@@ -93,10 +93,15 @@ if "stock_signals" in st.session_state:
                 option_client = DhanDataClient(client_id, token)
                 expiry_list = option_client.option_expiries(item["security_id"], "NSE_FNO")
                 today = datetime.now(IST).date()
-                valid_expiries = sorted(
-                    [datetime.strptime(x, "%Y-%m-%d").date() for x in expiry_list
-                     if datetime.strptime(x, "%Y-%m-%d").date() >= today]
-                )
+                valid_expiries = []
+                for expiry_value in expiry_list:
+                    try:
+                        expiry_date = datetime.strptime(str(expiry_value), "%Y-%m-%d").date()
+                    except (TypeError, ValueError):
+                        continue
+                    if expiry_date >= today:
+                        valid_expiries.append(expiry_date)
+                valid_expiries.sort()
                 if not valid_expiries:
                     st.warning("NO TRADE — Dhan returned no valid future option expiry for this stock.")
                 else:
@@ -125,12 +130,17 @@ if "stock_signals" in st.session_state:
                                 continue
                             mid = (bid + ask) / 2 if bid > 0 and ask > 0 else 0
                             spread_pct = (ask - bid) / mid if mid > 0 else 999
+                            greeks = leg.get("greeks") or {}
+                            delta = greeks.get("delta") if isinstance(greeks, dict) else None
+                            try:
+                                abs_delta = abs(float(delta))
+                            except (TypeError, ValueError):
+                                abs_delta = 0.0
+                            # Avoid far-OTM/near-zero-delta contracts; require a usable Greek.
                             if (bid > 0 and ask > 0 and ask >= bid and ltp > 0
                                 and volume > 0 and oi > 0 and bid_qty > 0 and ask_qty > 0
-                                and spread_pct <= 0.10):
-                                greeks = leg.get("greeks") or {}
-                                delta = greeks.get("delta")
-                                delta_distance = abs(abs(float(delta)) - 0.55) if delta is not None else 9.0
+                                and spread_pct <= 0.10 and 0.35 <= abs_delta <= 0.70):
+                                delta_distance = abs(abs_delta - 0.55)
                                 candidates.append({
                                     "strike": strike, "entry": ask, "ltp": ltp,
                                     "bid": bid, "ask": ask, "volume": volume, "oi": oi,
