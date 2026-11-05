@@ -162,7 +162,7 @@ def evaluate_symbol(
         breakout_level = float(last.breakout_level if side == "LONG" else last.breakdown_level)
         breakout_strength = min(1.5, abs(entry - breakout_level) / atr_value * 3)
         mtf = add_indicators(resample_ohlcv(intraday, "15min")).iloc[-1]
-        mtf_strength = min(1.0, abs(float(m.close - m.ema20)) / max(entry, 1e-9) * 100 * 10)
+        mtf_strength = min(1.0, abs(float(mtf.close - mtf.ema20)) / max(entry, 1e-9) * 100 * 10)
         score = 5.0 + trend_strength + rsi_strength + volume_strength + breakout_strength + mtf_strength
         if sector_relative_strength is not None:
             score += min(1.0, abs(float(sector_relative_strength)) * 10)
