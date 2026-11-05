@@ -260,6 +260,25 @@ class DhanDataClient:
         }
         return self._chart_request("/charts/historical", payload)
 
+
+    def option_expiries(self, underlying_security_id, underlying_segment="NSE_FNO") -> list[str]:
+        """Fetch active option expiries for an F&O underlying."""
+        payload = {"UnderlyingScrip": int(underlying_security_id), "UnderlyingSeg": underlying_segment}
+        body = self._post("/optionchain/expirylist", payload)
+        data = body.get("data", [])
+        if not isinstance(data, list):
+            raise DhanAPIError(f"Unexpected option expiry response: {body}")
+        return [str(x) for x in data]
+
+    def option_chain(self, underlying_security_id, expiry, underlying_segment="NSE_FNO") -> dict:
+        """Fetch live option chain; Dhan rate limit is one unique request per 3 seconds."""
+        payload = {
+            "UnderlyingScrip": int(underlying_security_id),
+            "UnderlyingSeg": underlying_segment,
+            "Expiry": str(expiry),
+        }
+        return self._post("/optionchain", payload)
+
     # Explicit aliases for callers preferring descriptive method names.
     get_ltp = ltp
     get_ohlc = ohlc
