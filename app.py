@@ -9,7 +9,36 @@ from strategy_engine import evaluate_symbol
 from backtest import run_backtest
 
 IST=ZoneInfo("Asia/Kolkata")
-st.set_page_config(page_title="HT NEXUS", page_icon="📈", layout="wide")
+st.set_page_config(page_title="HT NEXUS", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
+# Responsive, app-like presentation for Android/mobile browsers. Streamlit remains a web app.
+st.markdown("""
+<style>
+:root { color-scheme: light dark; }
+.block-container { max-width: 1180px; padding-top: 1.15rem; padding-bottom: 2.5rem; }
+[data-testid="stHeader"] { background: transparent; }
+[data-testid="stMetric"] {
+  border: 1px solid rgba(128,128,128,.22);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(128,128,128,.055);
+}
+.stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] > button {
+  width: 100%; min-height: 46px; border-radius: 12px; font-weight: 650;
+}
+[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
+section[data-testid="stSidebar"] { min-width: 290px; }
+@media (max-width: 768px) {
+  .block-container { padding: .65rem .8rem 2rem; }
+  h1 { font-size: 1.65rem !important; }
+  h2 { font-size: 1.3rem !important; }
+  h3 { font-size: 1.1rem !important; }
+  [data-testid="stMetric"] { padding: 9px 10px; }
+  .stButton > button, .stDownloadButton > button { min-height: 50px; }
+  [data-testid="stHorizontalBlock"] { gap: .5rem; }
+  [data-testid="stSidebar"] { width: min(88vw, 360px); }
+}
+</style>
+""", unsafe_allow_html=True)
 st.title("📈 HT NEXUS")
 st.caption("NSE STOCK-ONLY • BTST + SWING • DhanHQ data • Signals only — no auto orders")
 
