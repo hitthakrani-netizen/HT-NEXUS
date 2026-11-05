@@ -153,12 +153,25 @@ def evaluate_symbol(
         stop = entry - stop_distance if side == "LONG" else entry + stop_distance
         target = entry + target_distance if side == "LONG" else entry - target_distance
         rr = target_distance / stop_distance
-        score = 7.0
+
+        # Rank passing setups by measurable signal quality instead of assigning
+        # every candidate the same fixed score.
+        trend_strength = min(2.0, abs(float(last.ema20 - last.ema50)) / entry * 100 * 8)
+        rsi_strength = min(1.5, abs(float(last.rsi14) - 50) / 15)
+        volume_strength = min(1.5, max(0.0, min(float(last.volume_ratio), 3.0) - 1.0) * 0.75)
+        breakout_level = float(last.breakout_level if side == "LONG" else last.breakdown_level)
+        breakout_strength = min(1.5, abs(entry - breakout_level) / atr_value * 3)
+        mtf = add_indicators(resample_ohlcv(intraday, "15min")).iloc[-1]
+        mtf_strength = min(1.0, abs(float(m.close - m.ema20)) / max(entry, 1e-9) * 100 * 10)
+        score = 5.0 + trend_strength + rsi_strength + volume_strength + breakout_strength + mtf_strength
         if sector_relative_strength is not None:
             score += min(1.0, abs(float(sector_relative_strength)) * 10)
+        score = round(float(score), 2)
         reasons = (
             f"Daily trend confirmed; intraday EMA trend, RSI/MACD, VWAP, "
             f"15-minute confirmation, relative volume and false-breakout guard passed. "
+            f"Quality score uses trend separation, RSI strength, relative volume, "
+            f"breakout distance and 15-minute EMA separation. "
             f"Signal is based on this stock's own price/volume data; no NIFTY filter."
         )
         candidates.append({
