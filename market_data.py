@@ -123,6 +123,7 @@ class DhanDataClient:
             "Content-Type": "application/json",
             # DhanHQ v2 documents access-token as the authentication header.
             "access-token": self.access_token,
+            "client-id": self.client_id,
         })
         self._last_quote_request = 0.0
 
