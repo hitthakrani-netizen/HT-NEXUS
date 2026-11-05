@@ -11,8 +11,8 @@ from datetime import time
 from zoneinfo import ZoneInfo
 
 
-APP_NAME = "HT NEXUS PRO"
-APP_SUBTITLE = "BTST • SWING • OPTIONS INTELLIGENCE"
+APP_NAME = "HT NEXUS"
+APP_SUBTITLE = "BTST • SWING TRADING"
 
 TIMEZONE = ZoneInfo("Asia/Kolkata")
 

@@ -9,7 +9,7 @@ from strategy_engine import market_regime, evaluate_symbol, best_signal
 from backtest import run_backtest
 
 IST=ZoneInfo("Asia/Kolkata")
-st.set_page_config(page_title="HT NEXUS PRO", page_icon="📈", layout="wide",
+st.set_page_config(page_title="HT NEXUS", page_icon="📈", layout="wide",
                    initial_sidebar_state="collapsed")
 st.markdown("""
 <style>
@@ -19,7 +19,7 @@ st.markdown("""
 @media(max-width:700px){.block-container{padding-left:1rem;padding-right:1rem}}
 </style>
 """,unsafe_allow_html=True)
-st.title("📈 HT NEXUS PRO")
+st.title("📈 HT NEXUS")
 st.caption("BTST • Swing Trading • DhanHQ Data • Signals only — no automatic orders")
 
 with st.sidebar:
@@ -30,15 +30,15 @@ with st.sidebar:
     interval=st.selectbox("Intraday candle interval (minutes)",["5","15","1"],index=0)
     lookback=st.slider("Intraday history (days)",7,90,30)
     daily_lookback=st.slider("Daily history (calendar days)",250,1500,500,step=50)
+    nifty_id=st.text_input("NIFTY 50 Security ID (Dhan instrument master)",value="13",help="Verify this ID against Dhan's current instrument master.")
     capital=st.number_input("Backtest capital (₹)",min_value=10000,value=100000,step=10000)
     risk=st.slider("Risk per trade (%)",0.25,2.0,1.0,step=0.25)/100
     st.markdown("**Universe format:** `SYMBOL,SECURITY_ID,SECTOR`")
     universe_text=st.text_area("NSE symbols", value="RELIANCE,2885,ENERGY\nTCS,11536,IT\nINFY,1594,IT\nHDFCBANK,1333,BANK\nICICIBANK,4963,BANK\nSBIN,3045,BANK\nLT,11483,INDUSTRIALS\nITC,1660,FMCG\nAXISBANK,5900,BANK\nBHARTIARTL,10604,TELECOM",height=190)
     st.caption("Edit IDs/sectors against Dhan's current instrument master before live use.")
     st.markdown("**Sector index proxies** (`SECTOR,SECURITY_ID`)")
-    sector_text = st.text_area("Sector proxies", value="BANK,\\nIT,", height=90,
+    sector_text = st.text_area("Sector proxies", value="", height=90,
                                help="Replace with verified Dhan index IDs, e.g. BANKNIFTY and NIFTY IT proxy IDs.")
-    sector_text = sector_text.replace("IT,ಂತೆ", "IT,")
     sector_map = {}
     for line in sector_text.splitlines():
         bits = [v.strip() for v in line.split(",")]
@@ -56,12 +56,32 @@ if strategy=="BTST":
     if not (datetime.strptime("15:15","%H:%M").time()<=now<=datetime.strptime("15:29","%H:%M").time()):
         st.warning("BTST signal window is 3:15 PM–3:29 PM IST. Outside this window the engine will not generate a BTST signal.")
 
+if st.button("🔌 Test Dhan API Connection"):
+    try:
+        if not client_id or not token:
+            st.error("Client ID અથવા Access Token ખાલી છે. Streamlit Secrets માં DHAN_CLIENT_ID અને DHAN_ACCESS_TOKEN સેટ કરો.")
+        else:
+            with st.spinner("Checking Dhan access token..."):
+                profile = DhanDataClient(client_id, token).profile()
+            st.success("Dhan API authentication successful.")
+            st.write({
+                "Dhan Client ID matches": str(profile.get("dhanClientId")) == str(client_id).strip(),
+                "Token validity": profile.get("tokenValidity", "Not returned"),
+                "Data API plan": profile.get("dataPlan", "Not returned"),
+                "Data validity": profile.get("dataValidity", "Not returned"),
+                "Active segments": profile.get("activeSegment", "Not returned"),
+            })
+            if str(profile.get("dhanClientId")) != str(client_id).strip():
+                st.warning("આ Access Token અને Client ID એકબીજાના નથી. બંને એક જ Dhan accountના હોવા જોઈએ.")
+            if str(profile.get("dataPlan", "")).lower() != "active":
+                st.warning("Dhan profile મુજબ Data API plan Active નથી. Historical market data માટે Data API subscription જરૂરી હોઈ શકે છે.")
+    except Exception as e:
+        st.error(f"Dhan connection test failed: {e}")
+
 if st.button("🔍 Scan Market",type="primary"):
     try:
         client=DhanDataClient(client_id,token)
         with st.spinner("Fetching Dhan candles and evaluating filters..."):
-            # Nifty proxy uses the index security id. Confirm the current ID/segment with Dhan instrument master.
-            nifty_id=st.text_input("NIFTY 50 Security ID (Dhan instrument master)",value="13",key="niftyid")
             nifty_daily=client.daily(nifty_id,exchange_segment="IDX_I",instrument="INDEX",
                                      from_date=datetime.now(IST).date()-timedelta(days=daily_lookback))
             regime=market_regime(nifty_daily)
