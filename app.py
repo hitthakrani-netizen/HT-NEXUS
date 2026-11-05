@@ -157,21 +157,39 @@ if "last_regime" in st.session_state:
 with st.expander("Historical Backtesting"):
     st.write("Backtest one configured symbol using Dhan historical data. Results are estimates, not proof of future performance.")
     bt_symbol=st.selectbox("Backtest symbol",[x["symbol"] for x in universe] or ["RELIANCE"])
+    bt_lookback=st.selectbox("Backtest intraday history (calendar days)",[30,60,90],index=2)
     if st.button("Run Backtest"):
         try:
             item=next(x for x in universe if x["symbol"]==bt_symbol)
             client=DhanDataClient(client_id,token)
             end=datetime.now(IST).replace(tzinfo=None)
-            intra=client.intraday(item["security_id"],"NSE_EQ","EQUITY",interval,
-                                  end-timedelta(days=min(90,lookback)),end)
-            daily=client.daily(item["security_id"],"NSE_EQ","EQUITY",
-                               datetime.now(IST).date()-timedelta(days=daily_lookback))
-            result=run_backtest(bt_symbol,intra,daily,strategy,capital,risk)
-            st.json(result["summary"])
-            if not result["trades"].empty:
-                st.dataframe(result["trades"],use_container_width=True)
-                st.download_button("Download trades CSV",result["trades"].to_csv(index=False),
-                                   file_name=f"{bt_symbol}_{strategy}_backtest.csv",mime="text/csv")
+            with st.spinner(f"Downloading {bt_lookback} days of {bt_symbol} historical candles..."):
+                intra=client.intraday(item["security_id"],"NSE_EQ","EQUITY",interval,
+                                      end-timedelta(days=bt_lookback),end)
+                daily=client.daily(item["security_id"],"NSE_EQ","EQUITY",
+                                   datetime.now(IST).date()-timedelta(days=daily_lookback))
+            st.subheader("Historical Data Diagnostics")
+            d1,d2,d3=st.columns(3)
+            d1.metric("Intraday candles",len(intra))
+            d2.metric("Daily candles",len(daily))
+            d3.metric("Intraday interval",f"{interval} min")
+            if not intra.empty:
+                st.caption(f"Intraday range: {intra.index.min()} to {intra.index.max()}")
+            if not daily.empty:
+                st.caption(f"Daily range: {daily.index.min()} to {daily.index.max()}")
+            if intra.empty or daily.empty:
+                st.error("Dhan returned empty historical data. Check the Security ID, instrument type, date range and Data API access.")
+            else:
+                regime=market_regime(daily)
+                st.write(f"**NIFTY-independent symbol test; market regime input:** {regime['regime']} — {regime['reason']}")
+                result=run_backtest(bt_symbol,intra,daily,strategy,capital,risk)
+                st.json(result["summary"])
+                if result["summary"]["total_trades"] == 0:
+                    st.warning("No historical trades passed every strategy filter in this period. This is not a profitable/losing result; extend the test window or inspect the strategy filters.")
+                if not result["trades"].empty:
+                    st.dataframe(result["trades"],use_container_width=True)
+                    st.download_button("Download trades CSV",result["trades"].to_csv(index=False),
+                                       file_name=f"{bt_symbol}_{strategy}_backtest.csv",mime="text/csv")
         except Exception as e:
             st.error(f"Backtest error: {e}")
 
