@@ -1,2 +1,107 @@
-# HT-NEXUS
-Professional NSE F&amp;O Scanner for BTST and Swing Trading with Dhan API, Options Intelligence, Risk Management and Live Market Analysis. Signal Only – No Auto Orders.
+# HT NEXUS PRO
+
+Read-only DhanHQ v2 stock scanner with exactly two strategies:
+- **BTST:** signal generation restricted to 15:15–15:29 IST.
+- **SWING:** intended 1–3 trading-session holding window.
+
+The app is a research/paper-trading scaffold. It does **not** place, modify, or cancel orders.
+
+## Files
+- `app.py` — responsive Streamlit dashboard, scan controls, one-best-signal view, backtest and paper journal.
+- `market_data.py` — DhanHQ v2 read-only REST adapter for quotes and historical candles.
+- `indicators.py` — EMA, RSI, MACD, VWAP, ATR, volume ratio and breakout levels.
+- `strategy_engine.py` — regime, relative-strength helper, multi-timeframe and false-breakout checks, risk levels.
+- `backtest.py` — basic OHLC backtest with conservative stop-first same-bar handling.
+- `README.md` — setup and validation.
+
+## Requirements
+Python 3.10+ recommended.
+
+```bash
+pip install streamlit pandas numpy requests
+```
+
+## Credentials — never commit tokens
+Set environment variables locally:
+
+**macOS/Linux**
+```bash
+export DHAN_CLIENT_ID="your_client_id"
+export DHAN_ACCESS_TOKEN="your_access_token"
+streamlit run app.py
+```
+
+**Windows PowerShell**
+```powershell
+$env:DHAN_CLIENT_ID="your_client_id"
+$env:DHAN_ACCESS_TOKEN="your_access_token"
+streamlit run app.py
+```
+
+For Streamlit hosting, use the platform's Secrets Manager and set:
+```toml
+DHAN_CLIENT_ID = "..."
+DHAN_ACCESS_TOKEN = "..."
+```
+Do not paste credentials into source code, screenshots, GitHub, or chat. Add `.streamlit/secrets.toml` to `.gitignore` if you create it.
+
+## Universe and instrument IDs
+The sidebar accepts one row per stock:
+```text
+SYMBOL,SECURITY_ID,SECTOR
+RELIANCE,2885,ENERGY
+TCS,11536,IT
+```
+The sample list is only a starting point. Verify every security ID, exchange segment, instrument type and index ID against the current official Dhan instrument/security master before use. The dashboard accepts sector index proxy IDs in its sidebar, calculates 20-session NIFTY and sector returns, and compares each stock's 20-session return with its configured sector proxy. Sector proxies must be verified against Dhan's current instrument master; unconfigured sectors are not sector-filtered. Do not assume the example NIFTY ID without checking the current instrument master.
+
+## Dhan API notes
+This project uses DhanHQ API v2:
+- `POST /marketfeed/ltp`, `/marketfeed/ohlc`, `/marketfeed/quote`
+- `POST /charts/intraday`
+- `POST /charts/historical`
+
+Data API access/subscription and token permissions are separate from merely having a Dhan trading account. Confirm the current plan, access token validity, API rate limits and instrument master in Dhan's official portal/docs. Historical intraday requests are split into windows of at most 89 days by this client to stay within documented request-window limits.
+
+## Strategy logic (initial research rules, not validated edge)
+Long/short candidates require:
+- EMA20/EMA50 alignment; daily EMA20/EMA50 alignment.
+- RSI and MACD direction confirmation.
+- Price relative to session VWAP.
+- 20-bar breakout/breakdown with volume at least 1.5x 20-bar average.
+- Resampled 15-minute confirmation.
+- False-breakout guard: close beyond prior range and limited wick retracement.
+- ATR-based stop at 1.5 ATR and target at 2.5 ATR (nominal 1:1.67 before costs).
+- Market regime must not oppose the trade; BTST requires aligned regime.
+- Only the highest-scoring eligible candidate is displayed; otherwise NO TRADE.
+
+These are transparent starting parameters, not an assertion of accuracy. Backtest and tune only on training data; preserve a later untouched out-of-sample period.
+
+## Backtesting limitations — read before relying on results
+- The included backtest is a baseline engine, not a production-grade event simulator.
+- Intraday lookback from the UI is limited to 90 calendar days per fetch; the scanner/backtest does not magically create long history.
+- The backtest requires at least 210 daily candles and 250 intraday bars; it uses only data available before the signal date for the market-regime calculation.
+- Same-bar stop and target touches are resolved conservatively as stop first.
+- Slippage and brokerage are simplified configurable assumptions; taxes, exchange charges, STT, GST, stamp duty, bid/ask spread, liquidity/impact, circuit limits, corporate actions, survivorship bias, delisted stocks and rejected fills are not fully modeled.
+- The BTST historical exit logic is approximate. Validate with day-level execution assumptions and actual next-session opening/exit rules before use.
+- Multi-timeframe resampling and session boundaries should be reviewed against exchange trading calendars and candle timestamps.
+- Do not compare parameter sets on the same data used to choose them. Use walk-forward and out-of-sample validation, then paper trade.
+
+## Run
+```bash
+streamlit run app.py
+```
+Open the displayed URL on desktop or phone. For phone access on the same Wi-Fi, run Streamlit with `--server.address 0.0.0.0` and visit the computer's LAN IP and Streamlit port.
+
+## Security / Git
+Recommended `.gitignore`:
+```gitignore
+.streamlit/secrets.toml
+.env
+__pycache__/
+*.pyc
+*.csv
+```
+Never commit API credentials. Rotate the token immediately if exposed.
+
+## Important
+This software is for research/education only, not investment advice. No return, win rate, or accuracy is guaranteed. Check current Dhan API documentation before deployment because endpoints, permissions, pricing and limits can change.
