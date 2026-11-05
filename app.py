@@ -83,7 +83,83 @@ if "stock_signals" in st.session_state:
         st.dataframe(df,use_container_width=True,hide_index=True)
         st.write(best["reasons"])
         st.write(f"**Best setup:** {best['symbol']} | Entry ₹{best['entry']:.2f} | SL ₹{best['stop_loss']:.2f} | Target ₹{best['target']:.2f} | R:R 1:{best['risk_reward']:.2f}")
-        st.caption(f"Selected as the strongest among {len(signals)} qualifying stock signals. This is a stock signal only; CALL/PUT option details are not yet enabled.")
+        st.caption(f"Selected as the strongest among {len(signals)} qualifying stock signals.")
+        st.divider()
+        st.markdown("**Live option contract (Dhan Option Chain)**")
+        st.caption("LONG stock → CALL; SHORT stock → PUT. Contract is selected from the live chain; no order is placed.")
+        if st.button("Fetch live CALL/PUT contract", key="fetch_best_option"):
+            try:
+                item = next(x for x in universe if x["symbol"] == best["symbol"])
+                option_client = DhanDataClient(client_id, token)
+                expiry_list = option_client.option_expiries(item["security_id"], "NSE_FNO")
+                today = datetime.now(IST).date()
+                valid_expiries = sorted(
+                    [datetime.strptime(x, "%Y-%m-%d").date() for x in expiry_list
+                     if datetime.strptime(x, "%Y-%m-%d").date() >= today]
+                )
+                if not valid_expiries:
+                    st.warning("NO TRADE — Dhan returned no valid future option expiry for this stock.")
+                else:
+                    expiry = valid_expiries[0].isoformat()
+                    chain = option_client.option_chain(item["security_id"], expiry, "NSE_FNO")
+                    data = chain.get("data", {}) if isinstance(chain, dict) else {}
+                    spot = float(data.get("last_price", 0) or 0)
+                    oc = data.get("oc", {})
+                    option_side = "ce" if best["side"] == "LONG" else "pe"
+                    candidates = []
+                    if spot > 0 and isinstance(oc, dict):
+                        for strike_text, strike_data in oc.items():
+                            leg = strike_data.get(option_side) if isinstance(strike_data, dict) else None
+                            if not isinstance(leg, dict):
+                                continue
+                            bid = float(leg.get("top_bid_price", 0) or 0)
+                            ask = float(leg.get("top_ask_price", 0) or 0)
+                            ltp = float(leg.get("last_price", 0) or 0)
+                            volume = int(leg.get("volume", 0) or 0)
+                            oi = int(leg.get("oi", 0) or 0)
+                            bid_qty = int(leg.get("top_bid_quantity", 0) or 0)
+                            ask_qty = int(leg.get("top_ask_quantity", 0) or 0)
+                            try:
+                                strike = float(strike_text)
+                            except (TypeError, ValueError):
+                                continue
+                            mid = (bid + ask) / 2 if bid > 0 and ask > 0 else 0
+                            spread_pct = (ask - bid) / mid if mid > 0 else 999
+                            if (bid > 0 and ask > 0 and ask >= bid and ltp > 0
+                                and volume > 0 and oi > 0 and bid_qty > 0 and ask_qty > 0
+                                and spread_pct <= 0.10):
+                                greeks = leg.get("greeks") or {}
+                                delta = greeks.get("delta")
+                                delta_distance = abs(abs(float(delta)) - 0.55) if delta is not None else 9.0
+                                candidates.append({
+                                    "strike": strike, "entry": ask, "ltp": ltp,
+                                    "bid": bid, "ask": ask, "volume": volume, "oi": oi,
+                                    "spread_pct": spread_pct, "delta": delta,
+                                    "delta_distance": delta_distance,
+                                    "atm_distance": abs(strike - spot),
+                                    "security_id": leg.get("security_id"),
+                                })
+                    if not candidates:
+                        st.warning("NO TRADE — no option contract passed live liquidity and bid/ask spread checks.")
+                    else:
+                        chosen = min(candidates, key=lambda x: (x["delta_distance"], x["atm_distance"], x["spread_pct"]))
+                        premium_entry = chosen["entry"]
+                        premium_sl = round(premium_entry * 0.70, 2)
+                        premium_target = round(premium_entry * 1.50, 2)
+                        st.success("Live option contract found — verify the quote before any manual decision.")
+                        st.dataframe(pd.DataFrame([{
+                            "Underlying": best["symbol"], "Option": "CALL" if option_side == "ce" else "PUT",
+                            "Strike": chosen["strike"], "Expiry": expiry,
+                            "Entry (Ask)": round(premium_entry, 2), "LTP": round(chosen["ltp"], 2),
+                            "Bid": round(chosen["bid"], 2), "Ask": round(chosen["ask"], 2),
+                            "Volume": chosen["volume"], "OI": chosen["oi"],
+                            "Spread %": round(chosen["spread_pct"] * 100, 2),
+                            "SL (30%)": premium_sl, "Target (+50%)": premium_target,
+                            "Option Security ID": chosen["security_id"],
+                        }]), use_container_width=True, hide_index=True)
+                        st.caption("Illustrative premium risk levels only: SL = 30% below ask; target = 50% above ask. These are not backtested or guaranteed. Entry uses ask, not last traded price.")
+            except Exception as e:
+                st.error(f"Live option-chain check failed: {e}")
     else:
         st.warning("No stock passed the confirmation rules in this scan. This is a genuine NO TRADE result, not an index signal.")
     if st.session_state.get("stock_diagnostics"):
