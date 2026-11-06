@@ -223,7 +223,7 @@ stock_symbols = list(dict.fromkeys([x.get("symbol") for x in stock_signal_list i
 if stock_symbols:
     selected_stock = st.selectbox("Select scanned stock", stock_symbols, key="stock_option_select")
     selected_signal = next((x for x in stock_signal_list if x.get("symbol") == selected_stock), None)
-    stock_bias = selected_signal.get("side") if selected_signal else None
+    stock_bias = selected_signal.get("side") if selected_signal and selected_signal.get("score_label") in ("STRONG","QUALIFIED") else None
     if selected_signal:
         st.caption(f"Stock signal: {stock_bias} • {selected_signal.get('score_label','WATCHLIST')} • Score {selected_signal.get('score',0)}/100")
     if st.button("🔎 Scan STOCK CE / PE", type="primary", key="stock_ce_pe_scan"):
@@ -233,7 +233,7 @@ if stock_symbols:
                 st.session_state["stock_option_result"] = scan_stock_option_chain(_dhan_client(), selected_stock, item["security_id"], stock_bias)
         except Exception as e:
             st.error(f"Stock option scan failed: {e}")
-if "stock_option_result" in st.session_state:
+if "stock_option_result" in st.session_state and st.session_state["stock_option_result"].get("symbol") == (selected_stock if stock_symbols else None):
     sr = st.session_state["stock_option_result"]
     st.metric(f"{sr['symbol']} Spot", f"₹{sr['spot']:.2f}")
     st.caption(f"Expiry: {sr['expiry']} • Stock direction: {sr['bias'] or 'No confirmed stock signal'}")
