@@ -120,7 +120,7 @@ if st.button("🔌 Test Dhan API Connection"):
     except Exception as e:
         st.error(f"Dhan connection test failed: {e}")
 
-if st.button("🔍 Scan NSE Stocks",type="primary"):
+if st.button("🔍 Scan NIFTY + NSE Stocks",type="primary"):
     try:
         client=_dhan_client()
         signals=[]; diagnostics=[]; progress=st.progress(0)
