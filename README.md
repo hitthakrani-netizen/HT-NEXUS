@@ -109,3 +109,12 @@ Never commit API credentials. Rotate the token immediately if exposed.
 
 ## Important
 This software is for research/education only, not investment advice. No return, win rate, or accuracy is guaranteed. Check current Dhan API documentation before deployment because endpoints, permissions, pricing and limits can change.
+
+
+## Free TradingView plan and free scanner operation
+
+The scanner does not require Render or a paid TradingView webhook plan. It uses DhanHQ market data directly from the Streamlit Community Cloud app. TradingView Free alerts are not automatically delivered to this app; no unsupported scraping, account-password sharing, or unofficial TradingView API is used.
+
+The app scans NIFTY 50 and the configured NSE cash-stock universe when the user presses **Scan NSE Stocks**. NIFTY daily regime filters stock direction, and relative strength versus NIFTY contributes to ranking. NIFTY data errors are shown separately and the stock scan continues with neutral index context. BTST is time-gated to 3:15–3:29 PM IST; SWING can be scanned outside that window. The app is read-only and does not place orders.
+
+NIFTY 50 default Dhan ID 13 in segment IDX_I is supported by Dhan instrument references; verify the ID if Dhan returns a data error. Setup scores are technical confluence scores, not probabilities or guarantees. Backtest and paper-test before considering any live trade.
