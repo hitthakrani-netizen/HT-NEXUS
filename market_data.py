@@ -11,6 +11,7 @@ from typing import Any, Iterable, Optional
 
 import pandas as pd
 import requests
+import pyotp
 
 BASE_URL = "https://api.dhan.co/v2"
 IST = "Asia/Kolkata"
@@ -38,6 +39,35 @@ def _credentials_from_sources(client_id: Optional[str], access_token: Optional[s
             "environment variables or Streamlit secrets."
         )
     return cid, token
+
+
+
+def generate_access_token(client_id: str, pin: str, totp_secret: str, timeout: int = 20) -> dict:
+    """Generate a fresh 24-hour Dhan token using Dhan's official TOTP endpoint."""
+    if not client_id or not pin or not totp_secret:
+        raise ValueError("Automatic login needs DHAN_CLIENT_ID, DHAN_PIN and DHAN_TOTP_SECRET.")
+    try:
+        otp = pyotp.TOTP(str(totp_secret).replace(" ", "").strip()).now()
+    except Exception as exc:
+        raise DhanAPIError(f"Could not generate Dhan TOTP; check DHAN_TOTP_SECRET: {exc}") from exc
+    try:
+        response = requests.post(
+            "https://auth.dhan.co/app/generateAccessToken",
+            params={"dhanClientId": str(client_id).strip(), "pin": str(pin).strip(), "totp": otp},
+            headers={"Accept": "application/json"}, timeout=timeout,
+        )
+    except requests.RequestException as exc:
+        raise DhanAPIError(f"Network error generating Dhan access token: {exc}") from exc
+    try:
+        body = response.json()
+    except ValueError:
+        body = {"message": response.text[:300]}
+    if not response.ok or not isinstance(body, dict) or not body.get("accessToken"):
+        detail = body.get("errorMessage") or body.get("message") or body.get("errorCode") or body
+        raise DhanAPIError(f"Dhan automatic token generation failed (HTTP {response.status_code}): {detail}")
+    if str(body.get("dhanClientId", "")).strip() != str(client_id).strip():
+        raise DhanAPIError("Dhan returned a token for a different Client ID.")
+    return body
 
 
 def _as_date(value: Any) -> date:
