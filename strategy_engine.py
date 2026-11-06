@@ -1,119 +1,69 @@
-"""Two-strategy (BTST/SWING) signal engine for HT NEXUS PRO.
-
-Signals only. This module never places or manages orders.
-"""
+"""Weighted stock-only BTST/SWING signal engine. No orders are placed."""
 from __future__ import annotations
-
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
-
 from indicators import add_indicators, resample_ohlcv
 
 IST = ZoneInfo("Asia/Kolkata")
-BTST_START = time(15, 15)
-BTST_END = time(15, 29)
-
-
-def _last_valid(df: pd.DataFrame, column: str):
-    s = df[column].dropna()
-    return float(s.iloc[-1]) if not s.empty else np.nan
+BTST_START, BTST_END = time(15, 15), time(15, 29)
+MIN_QUALITY_SCORE = 60.0
 
 
 def market_regime(nifty_daily: pd.DataFrame) -> dict:
-    """Classify NIFTY using daily EMA20/50/200 and 20-session momentum."""
     try:
         x = add_indicators(nifty_daily)
         if len(x) < 205:
-            return {"regime": "NEUTRAL", "reason": "Need at least 205 daily candles for regime confirmation."}
-        last = x.iloc[-1]
-        bullish = last.close > last.ema20 > last.ema50 > last.ema200
-        bearish = last.close < last.ema20 < last.ema50 < last.ema200
-        momentum = float(last.close / x.close.iloc[-21] - 1)
-        if bullish and momentum > 0:
-            label, reason = "BULLISH", "NIFTY is above rising EMA20/50/200 with positive 20-session momentum."
-        elif bearish and momentum < 0:
-            label, reason = "BEARISH", "NIFTY is below EMA20/50/200 with negative 20-session momentum."
-        else:
-            label, reason = "NEUTRAL", "NIFTY trend and momentum are mixed; directional exposure is restricted."
-        return {"regime": label, "reason": reason, "momentum_20d": momentum}
+            return {"regime": "NEUTRAL", "reason": "Insufficient NIFTY history."}
+        z = x.iloc[-1]
+        if z.close > z.ema20 > z.ema50 > z.ema200:
+            return {"regime": "BULLISH", "reason": "NIFTY daily trend bullish."}
+        if z.close < z.ema20 < z.ema50 < z.ema200:
+            return {"regime": "BEARISH", "reason": "NIFTY daily trend bearish."}
+        return {"regime": "NEUTRAL", "reason": "NIFTY trend mixed."}
     except Exception as exc:
         return {"regime": "NEUTRAL", "reason": f"Regime unavailable: {exc}"}
 
 
 def relative_strength(stock_daily: pd.DataFrame, benchmark_daily: pd.DataFrame, lookback: int = 20):
-    """Stock total return minus benchmark total return over aligned recent sessions."""
     if len(stock_daily) <= lookback or len(benchmark_daily) <= lookback:
         return None
-    s = stock_daily["close"].dropna()
-    b = benchmark_daily["close"].dropna()
-    sr = float(s.iloc[-1] / s.iloc[-lookback - 1] - 1)
-    br = float(b.iloc[-1] / b.iloc[-lookback - 1] - 1)
-    return sr - br
-
-
-def _daily_confirmation(daily: pd.DataFrame, side: str) -> bool:
-    d = add_indicators(daily)
-    if len(d) < 205:
-        return False
-    x = d.iloc[-1]
-    if side == "LONG":
-        return bool(x.close > x.ema20 > x.ema50 and x.rsi14 >= 50)
-    return bool(x.close < x.ema20 < x.ema50 and x.rsi14 <= 50)
+    s, b = stock_daily.close.dropna(), benchmark_daily.close.dropna()
+    return float(s.iloc[-1] / s.iloc[-lookback-1] - b.iloc[-1] / b.iloc[-lookback-1])
 
 
 def _intraday_checks(intraday: pd.DataFrame, side: str):
     x = add_indicators(intraday)
     if len(x) < 220:
         return None
-    last, prev = x.iloc[-1], x.iloc[-2]
-    long_break = last.close > last.breakout_level
-    short_break = last.close < last.breakdown_level
-    # False-break guard: close must clear the prior level by a small buffer,
-    # wick retracement cannot exceed 45% of candle range, and close near extreme.
+    last = x.iloc[-1]
     rng = max(float(last.high - last.low), 1e-9)
     if side == "LONG":
-        wick_fraction = (last.high - last.close) / rng
-        false_break_ok = bool(long_break and last.close >= last.breakout_level * 1.001
-                              and wick_fraction <= 0.45 and last.close > last.open)
-        trend_ok = bool(last.close > last.ema20 > last.ema50)
-        momentum_ok = bool(last.rsi14 >= 52 and last.macd > last.macd_signal)
+        breakout = bool(last.close > last.breakout_level and last.close >= last.breakout_level * 1.001
+                        and (last.high-last.close)/rng <= .55 and last.close > last.open)
+        trend = bool(last.close > last.ema20 and last.ema20 > last.ema50)
+        momentum = bool(last.rsi14 >= 50 and last.macd > last.macd_signal)
         vwap_ok = bool(last.close > last.vwap)
     else:
-        wick_fraction = (last.close - last.low) / rng
-        false_break_ok = bool(short_break and last.close <= last.breakdown_level * 0.999
-                              and wick_fraction <= 0.45 and last.close < last.open)
-        trend_ok = bool(last.close < last.ema20 < last.ema50)
-        momentum_ok = bool(last.rsi14 <= 48 and last.macd < last.macd_signal)
+        breakout = bool(last.close < last.breakdown_level and last.close <= last.breakdown_level * .999
+                        and (last.close-last.low)/rng <= .55 and last.close < last.open)
+        trend = bool(last.close < last.ema20 and last.ema20 < last.ema50)
+        momentum = bool(last.rsi14 <= 50 and last.macd < last.macd_signal)
         vwap_ok = bool(last.close < last.vwap)
-    volume_ok = bool(last.volume_ratio >= 1.2)
-    # 15-minute close confirmation prevents acting on an unfinished aggregate.
+    volume = bool(last.volume_ratio >= 1.15)
     fifteen = add_indicators(resample_ohlcv(intraday, "15min"))
-    if len(fifteen) < 55:
-        mtf_ok = False
-    else:
+    mtf = False
+    if len(fifteen) >= 55:
         m = fifteen.iloc[-1]
-        mtf_ok = bool(m.close > m.ema20 if side == "LONG" else m.close < m.ema20)
-    return {
-        "frame": x, "last": last, "trend": trend_ok, "momentum": momentum_ok,
-        "vwap": vwap_ok, "volume": volume_ok, "breakout": false_break_ok,
-        "mtf": mtf_ok,
-    }
+        mtf = bool(m.close > m.ema20 if side == "LONG" else m.close < m.ema20)
+    return {"last": last, "trend": trend, "momentum": momentum, "vwap": vwap_ok,
+            "volume": volume, "breakout": breakout, "mtf": mtf, "fifteen": fifteen}
 
 
-def evaluate_symbol(
-    symbol: str,
-    intraday: pd.DataFrame,
-    daily: pd.DataFrame,
-    regime: dict,
-    strategy: str = "BTST",
-    sector_relative_strength=None,
-) -> dict | None:
-    """Return a single eligible symbol signal dict, or None.
-
-    Compatible with app.py's evaluate_symbol(symbol, intra, daily, regime,
-    strategy=..., sector_relative_strength=...) call.
+def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_relative_strength=None):
+    """Weighted confluence: daily direction + intraday trend, then rank by evidence.
+    Score is a setup-quality index, NOT a probability of profit.
     """
     strategy = str(strategy).upper()
     if strategy not in {"BTST", "SWING"}:
@@ -121,73 +71,63 @@ def evaluate_symbol(
     now = datetime.now(IST)
     if strategy == "BTST" and not (BTST_START <= now.time().replace(tzinfo=None) <= BTST_END):
         return None
-    if intraday is None or daily is None or len(intraday) < 220 or len(daily) < 205:
+    if intraday is None or daily is None or len(intraday) < 220 or len(daily) < 60:
         return None
-
-    # Score both directions; regime must not oppose the signal.
+    d = add_indicators(daily)
+    day = d.iloc[-1]
     candidates = []
     for side in ("LONG", "SHORT"):
-        # Stock-only logic: never gate a stock setup using NIFTY/index direction.
-        if not _daily_confirmation(daily, side):
+        daily_trend = bool(day.close > day.ema20 > day.ema50) if side == "LONG" else bool(day.close < day.ema20 < day.ema50)
+        if not daily_trend:
+            continue
+        if (side == "LONG" and day.rsi14 < 45) or (side == "SHORT" and day.rsi14 > 55):
             continue
         checks = _intraday_checks(intraday, side)
-        if not checks:
+        if not checks or not checks["trend"]:
             continue
-        passed = [checks[k] for k in ("trend", "momentum", "vwap", "volume", "breakout", "mtf")]
-        if not all(passed):
-            continue
-        if sector_relative_strength is not None:
-            # Relative strength is signed: positive supports long; negative supports short.
-            if side == "LONG" and sector_relative_strength <= 0:
-                continue
-            if side == "SHORT" and sector_relative_strength >= 0:
-                continue
-
         last = checks["last"]
-        atr_value = float(last.atr14)
-        if not np.isfinite(atr_value) or atr_value <= 0:
+        # Fixed, transparent weights; missing/weak confirmations lower score rather than
+        # silently disqualifying every otherwise valid trend setup.
+        points = {
+            "Daily trend": 25.0,
+            "Intraday EMA trend": 15.0,
+            "RSI + MACD": 15.0 if checks["momentum"] else 0.0,
+            "VWAP": 10.0 if checks["vwap"] else 0.0,
+            "Relative volume": 15.0 if checks["volume"] else 0.0,
+            "Breakout / breakdown": 10.0 if checks["breakout"] else 0.0,
+            "15m confirmation": 10.0 if checks["mtf"] else 0.0,
+        }
+        score = sum(points.values())
+        confirmations = sum(bool(checks[k]) for k in ("momentum", "vwap", "volume", "breakout", "mtf"))
+        if score < MIN_QUALITY_SCORE or confirmations < 2:
             continue
-        entry = float(last.close)
-        stop_distance = 1.5 * atr_value
-        target_distance = 2.5 * atr_value
-        stop = entry - stop_distance if side == "LONG" else entry + stop_distance
-        target = entry + target_distance if side == "LONG" else entry - target_distance
-        rr = target_distance / stop_distance
-
-        # Rank passing setups by measurable signal quality instead of assigning
-        # every candidate the same fixed score.
-        trend_strength = min(2.0, abs(float(last.ema20 - last.ema50)) / entry * 100 * 8)
-        rsi_strength = min(1.5, abs(float(last.rsi14) - 50) / 15)
-        volume_strength = min(1.5, max(0.0, min(float(last.volume_ratio), 3.0) - 1.0) * 0.75)
-        breakout_level = float(last.breakout_level if side == "LONG" else last.breakdown_level)
-        breakout_strength = min(1.5, abs(entry - breakout_level) / atr_value * 3)
-        mtf = add_indicators(resample_ohlcv(intraday, "15min")).iloc[-1]
-        mtf_strength = min(1.0, abs(float(mtf.close - mtf.ema20)) / max(entry, 1e-9) * 100 * 10)
-        score = 5.0 + trend_strength + rsi_strength + volume_strength + breakout_strength + mtf_strength
         if sector_relative_strength is not None:
-            score += min(1.0, abs(float(sector_relative_strength)) * 10)
-        score = round(float(score), 2)
-        reasons = (
-            f"Daily trend confirmed; intraday EMA trend, RSI/MACD, VWAP, "
-            f"15-minute confirmation, relative volume and false-breakout guard passed. "
-            f"Quality score uses trend separation, RSI strength, relative volume, "
-            f"breakout distance and 15-minute EMA separation. "
-            f"Signal is based on this stock's own price/volume data; no NIFTY filter."
-        )
+            aligned = sector_relative_strength > 0 if side == "LONG" else sector_relative_strength < 0
+            if aligned:
+                score = min(100.0, score + 5.0)
+        atr_value = float(last.atr14)
+        entry = float(last.close)
+        if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(entry) or entry <= 0:
+            continue
+        risk = 1.5 * atr_value
+        reward = 2.5 * atr_value
+        stop = entry-risk if side == "LONG" else entry+risk
+        target = entry+reward if side == "LONG" else entry-reward
+        mtf = checks["fifteen"].iloc[-1] if len(checks["fifteen"]) else None
+        reasons = "; ".join(f"{k}: {'PASS' if v else 'not confirmed'}" for k,v in points.items())
         candidates.append({
-            "symbol": symbol, "side": side, "strategy": strategy,
-            "entry": entry, "stop_loss": stop, "target": target,
-            "risk_reward": rr, "score": round(float(score), 2),
-            "reasons": reasons, "atr": atr_value,
+            "symbol": symbol, "side": side, "strategy": strategy, "entry": entry,
+            "stop_loss": stop, "target": target, "target1": entry+(risk if side=="LONG" else -risk),
+            "target2": entry+(1.5*risk if side=="LONG" else -1.5*risk),
+            "target3": target, "risk_reward": reward/risk, "score": round(score,1),
+            "score_label": "STRONG" if score >= 80 else "QUALIFIED",
+            "reasons": reasons, "atr": atr_value, "checks": checks,
             "sector_relative_strength": sector_relative_strength,
             "signal_time": str(intraday.index[-1]),
         })
-    return max(candidates, key=lambda s: s["score"]) if candidates else None
+    return max(candidates, key=lambda s: (s["score"], s["risk_reward"])) if candidates else None
 
 
 def best_signal(candidates):
-    """Return one top-ranked confirmed signal, or None (UI renders NO TRADE)."""
     valid = [x for x in (candidates or []) if isinstance(x, dict)]
-    if not valid:
-        return None
-    return sorted(valid, key=lambda x: (x.get("score", 0), x.get("risk_reward", 0)), reverse=True)[0]
+    return sorted(valid, key=lambda x: (x.get("score", 0), x.get("risk_reward", 0)), reverse=True)[0] if valid else None
