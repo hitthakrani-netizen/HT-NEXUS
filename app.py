@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from market_data import DhanDataClient, generate_access_token, parse_universe
-from strategy_engine import evaluate_symbol
+from strategy_engine import evaluate_symbol, market_regime
 from backtest import run_backtest
 
 IST=ZoneInfo("Asia/Kolkata")
@@ -40,7 +40,7 @@ section[data-testid="stSidebar"] { min-width: 290px; }
 </style>
 """, unsafe_allow_html=True)
 st.title("📈 HT NEXUS")
-st.caption("NSE STOCK-ONLY • BTST + SWING • DhanHQ data • Signals only — no auto orders")
+st.caption("NIFTY + NSE STOCKS • BTST + SWING • DhanHQ live-data confirmation • Signals only — no auto orders")
 
 def _secret_or_env(key: str) -> str:
     """Read optional Streamlit secret safely; fall back to environment."""
@@ -66,6 +66,7 @@ with st.sidebar:
     daily_lookback=st.slider("Daily history (calendar days)",250,1500,500,step=50)
     capital=st.number_input("Backtest capital (₹)",min_value=10000,value=100000,step=10000)
     risk=st.slider("Risk per trade (%)",0.25,2.0,1.0,step=0.25)/100
+    nifty_id=st.text_input("Dhan NIFTY 50 Index Security ID",value="13",help="Dhan instrument master મુજબ IDX_I / INDEX ID ચકાસો.")
     st.markdown("**NSE stock universe — SYMBOL,SECURITY_ID,SECTOR**")
     universe_text=st.text_area("NSE stocks",value="RELIANCE,2885,ENERGY\nTCS,11536,IT\nINFY,1594,IT\nHDFCBANK,1333,BANK\nICICIBANK,4963,BANK\nSBIN,3045,BANK\nLT,11483,INDUSTRIALS\nITC,1660,FMCG\nAXISBANK,5900,BANK\nBHARTIARTL,10604,TELECOM",height=220)
     st.caption("Verify each Security ID with Dhan's current NSE_EQ instrument master.")
@@ -123,14 +124,21 @@ if st.button("🔍 Scan NSE Stocks",type="primary"):
     try:
         client=_dhan_client()
         signals=[]; diagnostics=[]; progress=st.progress(0)
-        with st.spinner("Scanning configured NSE stocks independently — no NIFTY signal filter..."):
+        with st.spinner("Fetching NIFTY trend and scanning NSE stocks..."):
+            end=datetime.now(IST).replace(tzinfo=None)
+            nifty_daily=client.daily(nifty_id,"IDX_I","INDEX",datetime.now(IST).date()-timedelta(days=daily_lookback))
+            nifty_intraday=client.intraday(nifty_id,"IDX_I","INDEX",interval,end-timedelta(days=lookback),end)
+            nifty_regime=market_regime(nifty_daily)
+            nifty_signal=evaluate_symbol("NIFTY",nifty_intraday,nifty_daily,nifty_regime,strategy=strategy)
+            st.session_state["nifty_regime"]=nifty_regime
+            st.session_state["nifty_signal"]=nifty_signal
             for i,item in enumerate(universe):
                 try:
                     end=datetime.now(IST).replace(tzinfo=None)
                     intra=client.intraday(item["security_id"],"NSE_EQ","EQUITY",interval,end-timedelta(days=lookback),end)
                     daily=client.daily(item["security_id"],"NSE_EQ","EQUITY",datetime.now(IST).date()-timedelta(days=daily_lookback))
                     diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Data OK" if len(intra)>=220 and len(daily)>=205 else "Insufficient history"})
-                    sig=evaluate_symbol(item["symbol"],intra,daily,{"regime":"STOCK_ONLY","reason":"NIFTY-independent stock analysis"},strategy=strategy)
+                    sig=evaluate_symbol(item["symbol"],intra,daily,nifty_regime,strategy=strategy)
                     if sig:
                         sig["sector"]=item["sector"]
                         signals.append(sig)
@@ -143,6 +151,15 @@ if st.button("🔍 Scan NSE Stocks",type="primary"):
         st.error(f"Data/API error: {e}")
 
 if "stock_signals" in st.session_state:
+    regime=st.session_state.get("nifty_regime",{"regime":"UNKNOWN","reason":"NIFTY data unavailable"})
+    st.subheader("NIFTY 50 Market Confirmation")
+    st.metric("NIFTY Regime",regime.get("regime","UNKNOWN"))
+    st.caption(regime.get("reason",""))
+    ns=st.session_state.get("nifty_signal")
+    if ns:
+        st.success(f"NIFTY {ns['side']} setup • Score {ns['score']}/100 • Entry {ns['entry']:.2f} • SL {ns['stop_loss']:.2f} • Target {ns['target']:.2f}")
+    else:
+        st.info("NIFTY પર હાલ બધા confirmation મળ્યા નથી — index પર NO TRADE.")
     signals=st.session_state["stock_signals"]
     st.subheader("Single Strongest NSE Stock Signal")
     if signals:
