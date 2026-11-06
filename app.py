@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from market_data import DhanDataClient, parse_universe
+from market_data import DhanDataClient, generate_access_token, parse_universe
 from strategy_engine import evaluate_symbol
 from backtest import run_backtest
 
@@ -53,7 +53,13 @@ def _secret_or_env(key: str) -> str:
 with st.sidebar:
     st.subheader("Configuration")
     client_id=st.text_input("Dhan Client ID", value=_secret_or_env("DHAN_CLIENT_ID"))
-    token=st.text_input("Dhan Access Token", value=_secret_or_env("DHAN_ACCESS_TOKEN"), type="password")
+    auto_auth = bool(_secret_or_env("DHAN_PIN") and _secret_or_env("DHAN_TOTP_SECRET"))
+    if auto_auth:
+        st.success("Automatic Dhan login is configured (TOTP).")
+        token = ""
+    else:
+        token=st.text_input("Dhan Access Token", value=_secret_or_env("DHAN_ACCESS_TOKEN"), type="password")
+        st.info("For daily automatic login, configure DHAN_PIN and DHAN_TOTP_SECRET once in Streamlit Secrets.")
     strategy=st.selectbox("Strategy",["BTST","SWING"])
     interval=st.selectbox("Intraday candle interval (minutes)",["5","15","1"],index=0)
     lookback=st.slider("Intraday history (days)",7,90,30)
@@ -63,6 +69,35 @@ with st.sidebar:
     st.markdown("**NSE stock universe — SYMBOL,SECURITY_ID,SECTOR**")
     universe_text=st.text_area("NSE stocks",value="RELIANCE,2885,ENERGY\nTCS,11536,IT\nINFY,1594,IT\nHDFCBANK,1333,BANK\nICICIBANK,4963,BANK\nSBIN,3045,BANK\nLT,11483,INDUSTRIALS\nITC,1660,FMCG\nAXISBANK,5900,BANK\nBHARTIARTL,10604,TELECOM",height=220)
     st.caption("Verify each Security ID with Dhan's current NSE_EQ instrument master.")
+
+
+def _dhan_client():
+    """Reuse a session token and automatically generate a new one near expiry."""
+    cid = str(client_id).strip()
+    if not cid:
+        raise ValueError("Set DHAN_CLIENT_ID in Streamlit Secrets.")
+    pin = _secret_or_env("DHAN_PIN")
+    totp_secret = _secret_or_env("DHAN_TOTP_SECRET")
+    if pin and totp_secret:
+        cached = st.session_state.get("dhan_auto_auth", {})
+        expiry_text = cached.get("expiryTime", "")
+        valid_until = None
+        if expiry_text:
+            try:
+                valid_until = datetime.fromisoformat(str(expiry_text).replace("Z", "+00:00"))
+                if valid_until.tzinfo is None:
+                    valid_until = valid_until.replace(tzinfo=IST)
+            except ValueError:
+                valid_until = None
+        if cached.get("client_id") != cid or not cached.get("accessToken") or not valid_until or valid_until <= datetime.now(IST) + timedelta(minutes=5):
+            fresh = generate_access_token(cid, pin, totp_secret)
+            st.session_state["dhan_auto_auth"] = {"client_id": cid, "accessToken": fresh["accessToken"], "expiryTime": fresh.get("expiryTime", "")}
+            cached = st.session_state["dhan_auto_auth"]
+        return DhanDataClient(cid, cached["accessToken"])
+    if not token:
+        raise ValueError("Configure DHAN_PIN and DHAN_TOTP_SECRET for automatic login, or provide a valid 24-hour DHAN_ACCESS_TOKEN.")
+    return DhanDataClient(cid, token)
+
 
 universe=parse_universe(universe_text)
 c1,c2,c3=st.columns(3)
@@ -75,21 +110,18 @@ if strategy=="BTST" and not (datetime.strptime("15:15","%H:%M").time()<=datetime
 
 if st.button("🔌 Test Dhan API Connection"):
     try:
-        if not client_id or not token:
-            st.error("Set DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN in Streamlit Secrets.")
-        else:
-            profile=DhanDataClient(client_id,token).profile()
-            st.success("Dhan API authentication successful.")
-            st.write({"Client ID matches":str(profile.get("dhanClientId"))==str(client_id).strip(),
-                      "Token validity":profile.get("tokenValidity","Not returned"),
-                      "Data API plan":profile.get("dataPlan","Not returned"),
-                      "Data validity":profile.get("dataValidity","Not returned")})
+        profile=_dhan_client().profile()
+        st.success("Dhan API authentication successful.")
+        st.write({"Client ID matches":str(profile.get("dhanClientId"))==str(client_id).strip(),
+                  "Token validity":profile.get("tokenValidity","Not returned"),
+                  "Data API plan":profile.get("dataPlan","Not returned"),
+                  "Data validity":profile.get("dataValidity","Not returned")})
     except Exception as e:
         st.error(f"Dhan connection test failed: {e}")
 
 if st.button("🔍 Scan NSE Stocks",type="primary"):
     try:
-        client=DhanDataClient(client_id,token)
+        client=_dhan_client()
         signals=[]; diagnostics=[]; progress=st.progress(0)
         with st.spinner("Scanning configured NSE stocks independently — no NIFTY signal filter..."):
             for i,item in enumerate(universe):
@@ -127,7 +159,7 @@ if "stock_signals" in st.session_state:
         if st.button("Fetch live CALL/PUT contract", key="fetch_best_option"):
             try:
                 item = next(x for x in universe if x["symbol"] == best["symbol"])
-                option_client = DhanDataClient(client_id, token)
+                option_client = _dhan_client()
                 expiry_list = option_client.option_expiries(item["security_id"], "NSE_FNO")
                 today = datetime.now(IST).date()
                 valid_expiries = []
@@ -230,7 +262,7 @@ with st.expander("Historical Backtesting"):
     if st.button("Run Backtest"):
         try:
             item=next(x for x in universe if x["symbol"]==bt_symbol)
-            client=DhanDataClient(client_id,token); end=datetime.now(IST).replace(tzinfo=None)
+            client=_dhan_client(); end=datetime.now(IST).replace(tzinfo=None)
             with st.spinner(f"Downloading {bt_symbol} candles..."):
                 intra=client.intraday(item["security_id"],"NSE_EQ","EQUITY",interval,end-timedelta(days=bt_lookback),end)
                 daily=client.daily(item["security_id"],"NSE_EQ","EQUITY",datetime.now(IST).date()-timedelta(days=daily_lookback))
