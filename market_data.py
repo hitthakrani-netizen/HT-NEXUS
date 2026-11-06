@@ -56,7 +56,7 @@ def generate_access_token(client_id: str, pin: str, totp_secret: str, timeout: i
 
     # Setup keys are Base32. Remove only formatting whitespace, normalize case,
     # and retain legitimate Base32 padding if supplied.
-    secret = re.sub(r"\\s+", "", str(totp_secret)).upper()
+    secret = re.sub(r"\s+", "", str(totp_secret)).upper()
     try:
         totp = pyotp.TOTP(secret)
     except Exception as exc:
