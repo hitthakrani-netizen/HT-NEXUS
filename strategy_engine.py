@@ -61,7 +61,7 @@ def _intraday_checks(intraday: pd.DataFrame, side: str):
             "volume": volume, "breakout": breakout, "mtf": mtf, "fifteen": fifteen}
 
 
-def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_relative_strength=None):
+def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_relative_strength=None, enforce_btst_window=False):
     """Weighted confluence: daily direction + intraday trend, then rank by evidence.
     Score is a setup-quality index, NOT a probability of profit.
     """
@@ -69,7 +69,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
     if strategy not in {"BTST", "SWING"}:
         raise ValueError("Only BTST and SWING strategies are supported.")
     now = datetime.now(IST)
-    if strategy == "BTST" and not (BTST_START <= now.time().replace(tzinfo=None) <= BTST_END):
+    if strategy == "BTST" and enforce_btst_window and not (BTST_START <= now.time().replace(tzinfo=None) <= BTST_END):
         return None
     if intraday is None or daily is None or len(intraday) < 220 or len(daily) < 60:
         return None
