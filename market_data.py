@@ -43,31 +43,69 @@ def _credentials_from_sources(client_id: Optional[str], access_token: Optional[s
 
 
 def generate_access_token(client_id: str, pin: str, totp_secret: str, timeout: int = 20) -> dict:
-    """Generate a fresh 24-hour Dhan token using Dhan's official TOTP endpoint."""
+    """Generate a fresh Dhan token, avoiding TOTP time-window rollover races.
+
+    Dhan validates a 6-digit TOTP against its current 30-second time window.
+    If the first request is rejected specifically as Invalid TOTP, wait for
+    the next window and retry once with a newly generated code.
+    """
+    import re
+
     if not client_id or not pin or not totp_secret:
         raise ValueError("Automatic login needs DHAN_CLIENT_ID, DHAN_PIN and DHAN_TOTP_SECRET.")
+
+    # Setup keys are Base32. Remove only formatting whitespace, normalize case,
+    # and retain legitimate Base32 padding if supplied.
+    secret = re.sub(r"\\s+", "", str(totp_secret)).upper()
     try:
-        otp = pyotp.TOTP(str(totp_secret).replace(" ", "").strip()).now()
+        totp = pyotp.TOTP(secret)
     except Exception as exc:
-        raise DhanAPIError(f"Could not generate Dhan TOTP; check DHAN_TOTP_SECRET: {exc}") from exc
-    try:
-        response = requests.post(
-            "https://auth.dhan.co/app/generateAccessToken",
-            params={"dhanClientId": str(client_id).strip(), "pin": str(pin).strip(), "totp": otp},
-            headers={"Accept": "application/json"}, timeout=timeout,
-        )
-    except requests.RequestException as exc:
-        raise DhanAPIError(f"Network error generating Dhan access token: {exc}") from exc
-    try:
-        body = response.json()
-    except ValueError:
-        body = {"message": response.text[:300]}
-    if not response.ok or not isinstance(body, dict) or not body.get("accessToken"):
-        detail = body.get("errorMessage") or body.get("message") or body.get("errorCode") or body
-        raise DhanAPIError(f"Dhan automatic token generation failed (HTTP {response.status_code}): {detail}")
-    if str(body.get("dhanClientId", "")).strip() != str(client_id).strip():
-        raise DhanAPIError("Dhan returned a token for a different Client ID.")
-    return body
+        raise DhanAPIError(f"Could not initialize Dhan TOTP; check DHAN_TOTP_SECRET format: {exc}") from exc
+
+    def request_token(code: str):
+        try:
+            response = requests.post(
+                "https://auth.dhan.co/app/generateAccessToken",
+                params={"dhanClientId": str(client_id).strip(), "pin": str(pin).strip(), "totp": code},
+                headers={"Accept": "application/json"}, timeout=timeout,
+            )
+        except requests.RequestException as exc:
+            raise DhanAPIError(f"Network error generating Dhan access token: {exc}") from exc
+        try:
+            body = response.json()
+        except ValueError:
+            body = {"message": response.text[:300]}
+        if response.ok and isinstance(body, dict) and body.get("accessToken"):
+            if str(body.get("dhanClientId", "")).strip() != str(client_id).strip():
+                raise DhanAPIError("Dhan returned a token for a different Client ID.")
+            return body
+        detail = body.get("errorMessage") or body.get("message") or body.get("errorCode") or body if isinstance(body, dict) else body
+        return None, response.status_code, str(detail)
+
+    # Avoid sending a code in the final few seconds of its 30-second lifetime.
+    remaining = 30 - (time.time() % 30)
+    if remaining < 4:
+        time.sleep(remaining + 0.25)
+
+    result = request_token(totp.now())
+    if isinstance(result, tuple):
+        _, status_code, detail = result
+        if "totp" not in detail.lower() or "invalid" not in detail.lower():
+            raise DhanAPIError(f"Dhan automatic token generation failed (HTTP {status_code}): {detail}")
+
+        # A request crossing the 30-second boundary can be rejected even when
+        # generated correctly. Retry once in the next complete TOTP window.
+        remaining = 30 - (time.time() % 30)
+        time.sleep(remaining + 0.5)
+        result = request_token(totp.now())
+        if isinstance(result, tuple):
+            _, status_code, detail = result
+            raise DhanAPIError(
+                f"Dhan rejected the generated TOTP twice (HTTP {status_code}): {detail}. "
+                "This usually means the saved DHAN_TOTP_SECRET is not the currently enabled Dhan setup key, "
+                "or the Dhan PIN is incorrect. The app cannot correct a mismatched secret automatically."
+            )
+    return result
 
 
 def _as_date(value: Any) -> date:
