@@ -9,8 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from indicators import add_indicators, resample_ohlcv
-from strategy_engine import market_regime
+from strategy_engine import evaluate_symbol
 
 
 def _cost_rate(brokerage_bps: float, slippage_bps: float) -> float:
@@ -18,53 +17,31 @@ def _cost_rate(brokerage_bps: float, slippage_bps: float) -> float:
 
 
 def _signal_at(intra: pd.DataFrame, daily: pd.DataFrame, regime: dict, strategy: str, i: int):
-    """Causal, simplified signal check using data through bar i only."""
+    """Use the exact live strategy engine on data available through bar i.
+
+    The live BTST clock gate is bypassed by invoking the shared engine as SWING;
+    the historical BTST time window is enforced here against the historical bar.
+    """
     history = intra.iloc[:i + 1]
-    if len(history) < 220 or len(daily) < 205:
+    if len(history) < 220 or daily is None or len(daily) < 60:
         return None
     if strategy == "BTST":
-        local_time = history.index[-1].time()
         from datetime import time as _time
-        if not (_time(15, 15) <= local_time.replace(tzinfo=None) <= _time(15, 29)):
+        local_time = history.index[-1].time().replace(tzinfo=None)
+        if not (_time(15, 15) <= local_time <= _time(15, 29)):
             return None
-    x = add_indicators(history)
-    last = x.iloc[-1]
-    # Daily frame supplied to the caller is filtered to sessions <= current bar date.
-    d = add_indicators(daily)
-    if len(d) < 205:
+    # Calling as SWING avoids comparing historical timestamps with today's wall clock.
+    # All signal filters, score thresholds and confirmations now come from the live engine.
+    signal = evaluate_symbol(
+        "BACKTEST",
+        history,
+        daily,
+        regime or {"regime": "STOCK_ONLY", "reason": "Historical stock-only test"},
+        strategy="SWING",
+    )
+    if signal is None:
         return None
-    side = None
-    if last.close > last.ema20 > last.ema50 and last.rsi14 >= 52 and last.macd > last.macd_signal:
-        side = "LONG"
-    elif last.close < last.ema20 < last.ema50 and last.rsi14 <= 48 and last.macd < last.macd_signal:
-        side = "SHORT"
-    if side is None:
-        return None
-    # Stock-only backtest: no NIFTY/index regime filter is applied.
-    daily_last = d.iloc[-1]
-    daily_ok = (daily_last.close > daily_last.ema20 > daily_last.ema50
-                if side == "LONG" else
-                daily_last.close < daily_last.ema20 < daily_last.ema50)
-    if not daily_ok or not np.isfinite(last.atr14) or last.atr14 <= 0:
-        return None
-    if not (last.volume_ratio >= 1.2 and
-            (last.close > last.vwap if side == "LONG" else last.close < last.vwap)):
-        return None
-    if side == "LONG":
-        wick = (last.high - last.close) / max(last.high - last.low, 1e-9)
-        if not (last.close > last.breakout_level * 1.001 and wick <= .45 and last.close > last.open):
-            return None
-    else:
-        wick = (last.close - last.low) / max(last.high - last.low, 1e-9)
-        if not (last.close < last.breakdown_level * .999 and wick <= .45 and last.close < last.open):
-            return None
-    fifteen = add_indicators(resample_ohlcv(history, "15min"))
-    if len(fifteen) < 55:
-        return None
-    m = fifteen.iloc[-1]
-    if not (m.close > m.ema20 if side == "LONG" else m.close < m.ema20):
-        return None
-    return side, float(last.close), float(last.atr14)
+    return signal["side"], float(signal["entry"]), float(signal["atr"])
 
 
 def run_backtest(
@@ -166,11 +143,11 @@ def run_backtest(
             continue
         current_day = ts.date()
         daily_available = day.loc[[idx.date() <= current_day for idx in day.index]]
-        if len(daily_available) < 205:
+        if len(daily_available) < 60:
             continue
         # Avoid using today's final daily candle before its close.
         daily_available = daily_available.loc[[idx.date() < current_day for idx in daily_available.index]]
-        if len(daily_available) < 205:
+        if len(daily_available) < 60:
             continue
         regime = market_regime(daily_available)
         sig = _signal_at(intra, daily_available, regime, strategy, i)
