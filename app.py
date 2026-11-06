@@ -173,10 +173,13 @@ if "stock_signals" in st.session_state:
     if signals:
         # Keep exactly one highest-scoring qualifying stock; never mix weaker signals.
         best=max(signals,key=lambda x:(float(x.get("score",0)),float(x.get("risk_reward",0))))
-        df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target":round(best["target"],2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Sector":best.get("sector","")}])
+        df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target":round(best["target"],2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
         st.dataframe(df,use_container_width=True,hide_index=True)
         st.write(best["reasons"])
-        st.write(f"**Best setup:** {best['symbol']} | Entry ₹{best['entry']:.2f} | SL ₹{best['stop_loss']:.2f} | Target ₹{best['target']:.2f} | R:R 1:{best['risk_reward']:.2f}")
+        if best.get("score_label") in ("STRONG","QUALIFIED"):
+            st.success(f"Qualified setup: {best['symbol']} | Entry ₹{best['entry']:.2f} | SL ₹{best['stop_loss']:.2f} | Target ₹{best['target']:.2f} | R:R 1:{best['risk_reward']:.2f}")
+        else:
+            st.warning(f"Best WATCHLIST candidate only: {best['symbol']} | Score {best['score']}/100 — not a confirmed trade.")
         st.caption(f"Selected as the strongest among {len(signals)} qualifying stock signals.")
         st.divider()
         st.caption("Stock and NIFTY BTST / SWING signals only. No option contract selection or order placement.")
