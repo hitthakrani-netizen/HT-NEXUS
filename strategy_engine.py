@@ -105,7 +105,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
         }
         score = sum(points.values())
         confirmations = sum(bool(checks[k]) for k in ("momentum", "vwap", "volume", "breakout", "mtf"))
-        if score < MIN_QUALITY_SCORE or confirmations < 2:
+        if score < 45 or confirmations < 1:
             continue
         if sector_relative_strength is not None:
             aligned = sector_relative_strength > 0 if side == "LONG" else sector_relative_strength < 0
@@ -126,7 +126,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
             "stop_loss": stop, "target": target, "target1": entry+(risk if side=="LONG" else -risk),
             "target2": entry+(1.5*risk if side=="LONG" else -1.5*risk),
             "target3": target, "risk_reward": reward/risk, "score": round(score,1),
-            "score_label": "STRONG" if score >= 80 else "QUALIFIED",
+            "score_label": "STRONG" if score >= 80 else "QUALIFIED" if score >= MIN_QUALITY_SCORE and confirmations >= 2 else "WATCHLIST",
             "reasons": reasons, "atr": atr_value, "checks": checks,
             "sector_relative_strength": sector_relative_strength,
             "signal_time": str(intraday.index[-1]),
