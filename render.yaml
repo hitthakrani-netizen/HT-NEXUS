@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: ht-nexus-webhook
+    runtime: python
+    buildCommand: pip install -r webhook_receiver/requirements.txt
+    startCommand: uvicorn webhook_receiver.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: TRADINGVIEW_WEBHOOK_SECRET
+        sync: false
