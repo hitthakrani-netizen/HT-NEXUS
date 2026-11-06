@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from market_data import DhanDataClient, generate_access_token, parse_universe
-from strategy_engine import evaluate_symbol, market_regime
+from strategy_engine import evaluate_symbol, market_regime, relative_strength
 from backtest import run_backtest
 
 IST=ZoneInfo("Asia/Kolkata")
@@ -126,19 +126,27 @@ if st.button("🔍 Scan NSE Stocks",type="primary"):
         signals=[]; diagnostics=[]; progress=st.progress(0)
         with st.spinner("Fetching NIFTY trend and scanning NSE stocks..."):
             end=datetime.now(IST).replace(tzinfo=None)
-            nifty_daily=client.daily(nifty_id,"IDX_I","INDEX",datetime.now(IST).date()-timedelta(days=daily_lookback))
-            nifty_intraday=client.intraday(nifty_id,"IDX_I","INDEX",interval,end-timedelta(days=lookback),end)
-            nifty_regime=market_regime(nifty_daily)
-            nifty_signal=evaluate_symbol("NIFTY",nifty_intraday,nifty_daily,nifty_regime,strategy=strategy)
+            nifty_daily=pd.DataFrame()
+            nifty_regime={"regime":"NEUTRAL","reason":"NIFTY data not available; stock signals will not receive index confirmation."}
+            nifty_signal=None
+            try:
+                nifty_daily=client.daily(nifty_id,"IDX_I","INDEX",datetime.now(IST).date()-timedelta(days=daily_lookback))
+                nifty_intraday=client.intraday(nifty_id,"IDX_I","INDEX",interval,end-timedelta(days=lookback),end)
+                nifty_regime=market_regime(nifty_daily)
+                nifty_signal=evaluate_symbol("NIFTY",nifty_intraday,nifty_daily,nifty_regime,strategy=strategy)
+            except Exception as nifty_error:
+                st.warning(f"NIFTY data unavailable: {nifty_error}. Stock scan will continue without index confirmation.")
             st.session_state["nifty_regime"]=nifty_regime
             st.session_state["nifty_signal"]=nifty_signal
+            st.session_state["nifty_daily"]=nifty_daily
             for i,item in enumerate(universe):
                 try:
                     end=datetime.now(IST).replace(tzinfo=None)
                     intra=client.intraday(item["security_id"],"NSE_EQ","EQUITY",interval,end-timedelta(days=lookback),end)
                     daily=client.daily(item["security_id"],"NSE_EQ","EQUITY",datetime.now(IST).date()-timedelta(days=daily_lookback))
                     diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Data OK" if len(intra)>=220 and len(daily)>=205 else "Insufficient history"})
-                    sig=evaluate_symbol(item["symbol"],intra,daily,nifty_regime,strategy=strategy)
+                    srs=relative_strength(daily,nifty_daily) if not nifty_daily.empty else None
+                    sig=evaluate_symbol(item["symbol"],intra,daily,nifty_regime,strategy=strategy,sector_relative_strength=srs)
                     if sig:
                         sig["sector"]=item["sector"]
                         signals.append(sig)
@@ -161,7 +169,7 @@ if "stock_signals" in st.session_state:
     else:
         st.info("NIFTY પર હાલ બધા confirmation મળ્યા નથી — index પર NO TRADE.")
     signals=st.session_state["stock_signals"]
-    st.subheader("Single Strongest NSE Stock Signal")
+    st.subheader("Strongest NSE Stock BTST / SWING Signal")
     if signals:
         # Keep exactly one highest-scoring qualifying stock; never mix weaker signals.
         best=max(signals,key=lambda x:(float(x.get("score",0)),float(x.get("risk_reward",0))))
@@ -171,91 +179,7 @@ if "stock_signals" in st.session_state:
         st.write(f"**Best setup:** {best['symbol']} | Entry ₹{best['entry']:.2f} | SL ₹{best['stop_loss']:.2f} | Target ₹{best['target']:.2f} | R:R 1:{best['risk_reward']:.2f}")
         st.caption(f"Selected as the strongest among {len(signals)} qualifying stock signals.")
         st.divider()
-        st.markdown("**Live option contract (Dhan Option Chain)**")
-        st.caption("LONG stock → CALL; SHORT stock → PUT. Contract is selected from the live chain; no order is placed.")
-        if st.button("Fetch live CALL/PUT contract", key="fetch_best_option"):
-            try:
-                item = next(x for x in universe if x["symbol"] == best["symbol"])
-                option_client = _dhan_client()
-                expiry_list = option_client.option_expiries(item["security_id"], "NSE_FNO")
-                today = datetime.now(IST).date()
-                valid_expiries = []
-                for expiry_value in expiry_list:
-                    try:
-                        expiry_date = datetime.strptime(str(expiry_value), "%Y-%m-%d").date()
-                    except (TypeError, ValueError):
-                        continue
-                    if expiry_date >= today:
-                        valid_expiries.append(expiry_date)
-                valid_expiries.sort()
-                if not valid_expiries:
-                    st.warning("NO TRADE — Dhan returned no valid future option expiry for this stock.")
-                else:
-                    expiry = valid_expiries[0].isoformat()
-                    chain = option_client.option_chain(item["security_id"], expiry, "NSE_FNO")
-                    data = chain.get("data", {}) if isinstance(chain, dict) else {}
-                    spot = float(data.get("last_price", 0) or 0)
-                    oc = data.get("oc", {})
-                    option_side = "ce" if best["side"] == "LONG" else "pe"
-                    candidates = []
-                    if spot > 0 and isinstance(oc, dict):
-                        for strike_text, strike_data in oc.items():
-                            leg = strike_data.get(option_side) if isinstance(strike_data, dict) else None
-                            if not isinstance(leg, dict):
-                                continue
-                            bid = float(leg.get("top_bid_price", 0) or 0)
-                            ask = float(leg.get("top_ask_price", 0) or 0)
-                            ltp = float(leg.get("last_price", 0) or 0)
-                            volume = int(leg.get("volume", 0) or 0)
-                            oi = int(leg.get("oi", 0) or 0)
-                            bid_qty = int(leg.get("top_bid_quantity", 0) or 0)
-                            ask_qty = int(leg.get("top_ask_quantity", 0) or 0)
-                            try:
-                                strike = float(strike_text)
-                            except (TypeError, ValueError):
-                                continue
-                            mid = (bid + ask) / 2 if bid > 0 and ask > 0 else 0
-                            spread_pct = (ask - bid) / mid if mid > 0 else 999
-                            greeks = leg.get("greeks") or {}
-                            delta = greeks.get("delta") if isinstance(greeks, dict) else None
-                            try:
-                                abs_delta = abs(float(delta))
-                            except (TypeError, ValueError):
-                                abs_delta = 0.0
-                            # Avoid far-OTM/near-zero-delta contracts; require a usable Greek.
-                            if (bid > 0 and ask > 0 and ask >= bid and ltp > 0
-                                and volume > 0 and oi > 0 and bid_qty > 0 and ask_qty > 0
-                                and spread_pct <= 0.10 and 0.35 <= abs_delta <= 0.70):
-                                delta_distance = abs(abs_delta - 0.55)
-                                candidates.append({
-                                    "strike": strike, "entry": ask, "ltp": ltp,
-                                    "bid": bid, "ask": ask, "volume": volume, "oi": oi,
-                                    "spread_pct": spread_pct, "delta": delta,
-                                    "delta_distance": delta_distance,
-                                    "atm_distance": abs(strike - spot),
-                                    "security_id": leg.get("security_id"),
-                                })
-                    if not candidates:
-                        st.warning("NO TRADE — no option contract passed live liquidity and bid/ask spread checks.")
-                    else:
-                        chosen = min(candidates, key=lambda x: (x["delta_distance"], x["atm_distance"], x["spread_pct"]))
-                        premium_entry = chosen["entry"]
-                        premium_sl = round(premium_entry * 0.70, 2)
-                        premium_target = round(premium_entry * 1.50, 2)
-                        st.success("Live option contract found — verify the quote before any manual decision.")
-                        st.dataframe(pd.DataFrame([{
-                            "Underlying": best["symbol"], "Option": "CALL" if option_side == "ce" else "PUT",
-                            "Strike": chosen["strike"], "Expiry": expiry,
-                            "Entry (Ask)": round(premium_entry, 2), "LTP": round(chosen["ltp"], 2),
-                            "Bid": round(chosen["bid"], 2), "Ask": round(chosen["ask"], 2),
-                            "Volume": chosen["volume"], "OI": chosen["oi"],
-                            "Spread %": round(chosen["spread_pct"] * 100, 2),
-                            "SL (30%)": premium_sl, "Target (+50%)": premium_target,
-                            "Option Security ID": chosen["security_id"],
-                        }]), use_container_width=True, hide_index=True)
-                        st.caption("Illustrative premium risk levels only: SL = 30% below ask; target = 50% above ask. These are not backtested or guaranteed. Entry uses ask, not last traded price.")
-            except Exception as e:
-                st.error(f"Live option-chain check failed: {e}")
+        st.caption("Stock and NIFTY BTST / SWING signals only. No option contract selection or order placement.")
     else:
         diagnostics = st.session_state.get("stock_diagnostics", [])
         all_data_failed = bool(diagnostics) and all(
@@ -273,7 +197,7 @@ if "stock_signals" in st.session_state:
             st.dataframe(pd.DataFrame(st.session_state["stock_diagnostics"]),use_container_width=True,hide_index=True)
 
 with st.expander("Historical Backtesting"):
-    st.caption("Single-stock historical test; independent of NIFTY direction.")
+    st.caption("Single-stock historical test; historical performance does not guarantee future results.")
     bt_symbol=st.selectbox("Backtest stock",[x["symbol"] for x in universe] or ["RELIANCE"])
     bt_lookback=st.selectbox("Intraday history (calendar days)",[30,60,90],index=2)
     if st.button("Run Backtest"):
