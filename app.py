@@ -38,6 +38,20 @@ section[data-testid="stSidebar"] { min-width: 290px; }
   [data-testid="stHorizontalBlock"] { gap: .5rem; }
   [data-testid="stSidebar"] { width: min(88vw, 360px); }
 }
+
+[data-testid="stHeader"] { background:transparent; }
+[data-testid="stAppViewContainer"] { background:linear-gradient(180deg,rgba(17,48,82,.045),transparent 320px); }
+[data-testid="stMetric"] { border-radius:16px; box-shadow:0 5px 18px rgba(20,35,60,.055); }
+[data-testid="stExpander"] { border-radius:15px; }
+.stButton > button { min-height:48px; border-radius:13px; font-weight:750; box-shadow:0 4px 12px rgba(25,65,110,.10); }
+@media (max-width:768px) {
+.block-container { padding:.55rem .65rem 1.5rem; }
+h1 { font-size:1.55rem !important; } h2 { font-size:1.25rem !important; } h3 { font-size:1.08rem !important; }
+[data-testid="stMetric"] { padding:9px 10px; }
+[data-testid="stMetricValue"] { font-size:1.35rem; }
+[data-testid="stHorizontalBlock"] { gap:.45rem; }
+.stButton > button { min-height:52px; }
+}
 </style>
 """, unsafe_allow_html=True)
 st.markdown("""<div style="padding:22px 18px;border-radius:22px;background:linear-gradient(130deg,#101d38,#18527a,#07858a);color:white;margin:4px 0 18px"><div style="font-size:.72rem;letter-spacing:.16em;font-weight:800">DHAN LIVE DATA • TECHNICAL SCANNER</div><div style="font-size:2rem;font-weight:900;margin-top:5px">⚡ HT NEXUS PRO</div><div style="font-size:.9rem">NIFTY OPTIONS · STOCK OPTIONS · BTST · SWING</div><div style="margin-top:12px;font-size:.75rem;font-weight:750">LIVE DATA　•　TWO TARGETS + SL　•　READ-ONLY SIGNALS</div></div>""",unsafe_allow_html=True)
@@ -173,7 +187,7 @@ if "stock_signals" in st.session_state:
     if signals:
         # Keep exactly one highest-scoring qualifying stock; never mix weaker signals.
         best=max(signals,key=lambda x:(float(x.get("score",0)),float(x.get("risk_reward",0))))
-        df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target":round(best["target"],2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
+        df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target 1":round(best.get("target1",best["target"]),2),"Target 2":round(best.get("target2",best["target"]),2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
         st.dataframe(df,use_container_width=True,hide_index=True)
         st.write(best["reasons"])
         if best.get("score_label") in ("STRONG","QUALIFIED"):
