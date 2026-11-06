@@ -9,7 +9,7 @@ from strategy_engine import evaluate_symbol, market_regime, relative_strength
 from backtest import run_backtest
 
 IST=ZoneInfo("Asia/Kolkata")
-st.set_page_config(page_title="HT NEXUS", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="HT NEXUS PRO", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
 # Responsive, app-like presentation for Android/mobile browsers. Streamlit remains a web app.
 st.markdown("""
 <style>
@@ -39,8 +39,7 @@ section[data-testid="stSidebar"] { min-width: 290px; }
 }
 </style>
 """, unsafe_allow_html=True)
-st.title("📈 HT NEXUS")
-st.caption("NIFTY CALL/PUT BTST + NSE STOCK BTST/SWING • DhanHQ live data • Signals only — no auto orders")
+st.markdown("""<div style="padding:22px 18px;border-radius:22px;background:linear-gradient(130deg,#101d38,#18527a,#07858a);color:white;margin:4px 0 18px"><div style="font-size:.72rem;letter-spacing:.16em;font-weight:800">DHAN LIVE DATA • TECHNICAL SCANNER</div><div style="font-size:2rem;font-weight:900;margin-top:5px">⚡ HT NEXUS PRO</div><div style="font-size:.9rem">NIFTY OPTIONS · STOCK OPTIONS · BTST · SWING</div><div style="margin-top:12px;font-size:.75rem;font-weight:750">LIVE DATA　•　TWO TARGETS + SL　•　READ-ONLY SIGNALS</div></div>""",unsafe_allow_html=True)
 
 def _secret_or_env(key: str) -> str:
     """Read optional Streamlit secret safely; fall back to environment."""
