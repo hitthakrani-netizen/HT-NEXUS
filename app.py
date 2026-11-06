@@ -272,7 +272,12 @@ if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_optio
                     abs_delta = abs(delta)
                     if bid > 0 and ask >= bid and ltp > 0 and volume > 0 and oi > 0 and int(leg.get("top_bid_quantity",0) or 0) > 0 and int(leg.get("top_ask_quantity",0) or 0) > 0 and spread <= 0.12 and 0.35 <= abs_delta <= 0.70:
                         score = 30 + min(volume/100000, 20) + min(oi/1000000, 20) + max(0, 20-abs(abs_delta-0.55)*100) + max(0, 10-spread*100)
-                        rows.append({"Type":label,"Strike":strike,"Expiry":expiry,"LTP":round(ltp,2),"Bid":round(bid,2),"Ask":round(ask,2),"Spread %":round(spread*100,2),"Delta":round(delta,3),"Volume":volume,"OI":oi,"Score":round(score,1),"Distance":abs(strike-spot),"Security ID":leg.get("security_id")})
+                        entry_price = ask
+                        stop_price = round(entry_price * 0.85, 2)
+                        risk_per_unit = entry_price - stop_price
+                        target1_price = round(entry_price + risk_per_unit, 2)
+                        target2_price = round(entry_price + (2 * risk_per_unit), 2)
+                        rows.append({"Type":label,"Strike":strike,"Expiry":expiry,"LTP":round(ltp,2),"Buy Price (Ask)":round(entry_price,2),"Stop Loss":stop_price,"Target 1":target1_price,"Target 2":target2_price,"Spread %":round(spread*100,2),"Delta":round(delta,3),"Volume":volume,"OI":oi,"Score":round(score,1),"Distance":abs(strike-spot),"Security ID":leg.get("security_id")})
             calls = sorted([r for r in rows if r["Type"]=="CALL"],key=lambda r:(-r["Score"],r["Distance"]))
             puts = sorted([r for r in rows if r["Type"]=="PUT"],key=lambda r:(-r["Score"],r["Distance"]))
             st.session_state["nifty_option_scan"] = {"spot":spot,"expiry":expiry,"direction":direction,"regime":regime,"calls":calls[:5],"puts":puts[:5]}
@@ -296,8 +301,8 @@ if "nifty_option_scan" in st.session_state:
     best_list = result["calls"] if preferred=="CALL" else result["puts"] if preferred=="PUT" else []
     if best_list:
         best = best_list[0]
-        st.success(f"BTST preference: {preferred} {best['Strike']} • Entry reference ₹{best['Ask']:.2f} (Ask) • Liquidity score {best['Score']}/100")
-        st.caption("Ask price is a reference quote, not guaranteed execution. Premium risk controls are not yet backtested.")
+        st.success(f"BTST preference: {preferred} {best['Strike']} • BUY near ₹{best['Buy Price (Ask)']:.2f} • SL ₹{best['Stop Loss']:.2f} • T1 ₹{best['Target 1']:.2f} • T2 ₹{best['Target 2']:.2f} • Liquidity score {best['Score']}/100")
+        st.caption("Risk model: 15% premium stop; Target 1 = 1R (+15%), Target 2 = 2R (+30%). Ask is indicative, not guaranteed fill. These are formula-based planning levels, not tested predictions; confirm live spread and risk before entry.")
     else:
         st.warning("NO CONFIRMED NIFTY BTST OPTION — trend neutral/mixed છે અથવા કોઈ contract liquidity checks પાસ કરતો નથી.")
 
