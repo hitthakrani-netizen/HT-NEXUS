@@ -275,10 +275,12 @@ if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_optio
                     direction = "BULLISH"
                 elif z.close < z.ema20 < z.ema50 and z.rsi14 <= 50 and z.macd < z.macd_signal:
                     direction = "BEARISH"
-            if regime.get("regime") == direction:
-                direction = "STRONG " + direction
-            elif regime.get("regime") in ("BULLISH", "BEARISH") and direction in ("BULLISH", "BEARISH") and regime.get("regime") != direction:
-                direction = "MIXED (daily/intraday conflict)"
+            daily_direction = regime.get("regime", "NEUTRAL")
+            intraday_direction = direction
+            if intraday_direction in ("BULLISH", "BEARISH") and daily_direction == intraday_direction:
+                direction = "HIGH CONFIDENCE " + intraday_direction
+            else:
+                direction = "WAIT (DAILY / INTRADAY NOT ALIGNED)"
             expiries = client.option_expiries(nifty_id, "IDX_I")
             today = datetime.now(IST).date()
             valid_expiries = []
@@ -341,7 +343,11 @@ if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_optio
 if "nifty_option_scan" in st.session_state:
     result = st.session_state["nifty_option_scan"]
     st.metric("NIFTY Spot", f"{result['spot']:.2f}")
-    st.write(f"**Market direction:** {result['direction']} | **Daily regime:** {result['regime'].get('regime')} | **Expiry:** {result['expiry']}")
+    st.write(f"**Signal status:** {result['direction']} | **Daily regime:** {result['regime'].get('regime')} | **Expiry:** {result['expiry']}")
+    if result["direction"].startswith("HIGH CONFIDENCE"):
+        st.success("Daily અને Intraday બંને એક જ દિશામાં છે — alignment confirmation મળ્યું.")
+    else:
+        st.warning("Daily અને Intraday એક જ દિશામાં નથી અથવા trend સ્પષ્ટ નથી. હાલ CALL/PUT BTST recommendation રોકી છે.")
     left, right = st.columns(2)
     with left:
         st.markdown("**CALL candidates**")
@@ -351,14 +357,14 @@ if "nifty_option_scan" in st.session_state:
         st.markdown("**PUT candidates**")
         if result["puts"]: st.dataframe(pd.DataFrame(result["puts"]),use_container_width=True,hide_index=True)
         else: st.info("No PUT contract passed liquidity filters.")
-    preferred = "CALL" if "BULLISH" in result["direction"] else "PUT" if "BEARISH" in result["direction"] else None
+    preferred = "CALL" if result["direction"] == "HIGH CONFIDENCE BULLISH" else "PUT" if result["direction"] == "HIGH CONFIDENCE BEARISH" else None
     best_list = result["calls"] if preferred=="CALL" else result["puts"] if preferred=="PUT" else []
     if best_list:
         best = best_list[0]
         st.success(f"BTST preference: {preferred} {best['Strike']} • BUY near ₹{best['Buy Price (Ask)']:.2f} • SL ₹{best['Stop Loss']:.2f} • T1 ₹{best['Target 1']:.2f} • T2 ₹{best['Target 2']:.2f} • Liquidity score {best['Score']}/100")
         st.caption("Risk model: 15% premium stop; Target 1 = 1R (+15%), Target 2 = 2R (+30%). Ask is indicative, not guaranteed fill. These are formula-based planning levels, not tested predictions; confirm live spread and risk before entry.")
     else:
-        st.warning("NO CONFIRMED NIFTY BTST OPTION — trend neutral/mixed છે અથવા કોઈ contract liquidity checks પાસ કરતો નથી.")
+        st.warning("NO TRADE — trend alignment નથી અથવા કોઈ contract liquidity checks પાસ કરતો નથી.")
 
 with st.expander("Historical Backtesting"):
     st.caption("Single-stock historical test; historical performance does not guarantee future results.")
