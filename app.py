@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from market_data import DhanDataClient, generate_access_token, parse_universe
 from strategy_engine import evaluate_symbol, market_regime, relative_strength
 from backtest import run_backtest
+from stock_options import scan_stock_option_chain
 
 IST=ZoneInfo("Asia/Kolkata")
 st.set_page_config(page_title="HT NEXUS PRO", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
@@ -199,6 +200,46 @@ if "stock_signals" in st.session_state:
             st.dataframe(pd.DataFrame(st.session_state["stock_diagnostics"]),use_container_width=True,hide_index=True)
 
 
+
+st.divider()
+st.subheader("📊 STOCK OPTIONS — CE / PE BTST")
+st.caption("Stock scan માંથી મળેલા શેર માટે Dhan option chain, buy price, stop loss અને બે targets.")
+stock_signal_list = st.session_state.get("stock_signals", [])
+stock_symbols = list(dict.fromkeys([x.get("symbol") for x in stock_signal_list if x.get("symbol")] + [x["symbol"] for x in universe]))
+if stock_symbols:
+    selected_stock = st.selectbox("Select scanned stock", stock_symbols, key="stock_option_select")
+    selected_signal = next((x for x in stock_signal_list if x.get("symbol") == selected_stock), None)
+    stock_bias = selected_signal.get("side") if selected_signal else None
+    if selected_signal:
+        st.caption(f"Stock signal: {stock_bias} • {selected_signal.get('score_label','WATCHLIST')} • Score {selected_signal.get('score',0)}/100")
+    if st.button("🔎 Scan STOCK CE / PE", type="primary", key="stock_ce_pe_scan"):
+        try:
+            item = next(x for x in universe if x["symbol"] == selected_stock)
+            with st.spinner(f"{selected_stock} option chain checking..."):
+                st.session_state["stock_option_result"] = scan_stock_option_chain(_dhan_client(), selected_stock, item["security_id"], stock_bias)
+        except Exception as e:
+            st.error(f"Stock option scan failed: {e}")
+if "stock_option_result" in st.session_state:
+    sr = st.session_state["stock_option_result"]
+    st.metric(f"{sr['symbol']} Spot", f"₹{sr['spot']:.2f}")
+    st.caption(f"Expiry: {sr['expiry']} • Stock direction: {sr['bias'] or 'No confirmed stock signal'}")
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**CALL / CE candidates**")
+        if sr["calls"]: st.dataframe(pd.DataFrame(sr["calls"]), use_container_width=True, hide_index=True)
+        else: st.info("No CALL passed liquidity filters.")
+    with right:
+        st.markdown("**PUT / PE candidates**")
+        if sr["puts"]: st.dataframe(pd.DataFrame(sr["puts"]), use_container_width=True, hide_index=True)
+        else: st.info("No PUT passed liquidity filters.")
+    if sr["best"]:
+        b = sr["best"]
+        st.success(f"{sr['symbol']} {sr['preferred']} {b['Strike']} • BUY ₹{b['BUY (Ask)']:.2f} • SL ₹{b['SL']:.2f} • T1 ₹{b['Target 1']:.2f} • T2 ₹{b['Target 2']:.2f} • Score {b['Score']}/100")
+        st.caption("CE follows LONG stock signal; PE follows SHORT stock signal. Premium SL 15%, targets 1R/2R are planning levels only, not backtested forecasts.")
+    else:
+        st.warning("Stock direction confirmation નથી અથવા કોઈ યોગ્ય liquid contract નથી. CALL/PUT માંથી trade force કરવામાં આવતો નથી.")
+else:
+    st.caption("પહેલા ઉપર Stock BTST / SWING scan કરો, પછી અહીં એ શેરનું CE / PE scan કરો.")
 
 st.divider()
 st.subheader("🧭 NIFTY OPTIONS — BTST CALL / PUT")
