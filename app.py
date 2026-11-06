@@ -40,7 +40,7 @@ section[data-testid="stSidebar"] { min-width: 290px; }
 </style>
 """, unsafe_allow_html=True)
 st.title("📈 HT NEXUS")
-st.caption("NIFTY + NSE STOCKS • BTST + SWING • DhanHQ live-data confirmation • Signals only — no auto orders")
+st.caption("NIFTY CALL/PUT BTST + NSE STOCK BTST/SWING • DhanHQ live data • Signals only — no auto orders")
 
 def _secret_or_env(key: str) -> str:
     """Read optional Streamlit secret safely; fall back to environment."""
@@ -120,7 +120,7 @@ if st.button("🔌 Test Dhan API Connection"):
     except Exception as e:
         st.error(f"Dhan connection test failed: {e}")
 
-if st.button("🔍 Scan NIFTY + NSE Stocks",type="primary"):
+if st.button("📈 Scan STOCKS — BTST / SWING",type="primary"):
     try:
         client=_dhan_client()
         signals=[]; diagnostics=[]; progress=st.progress(0)
@@ -133,7 +133,7 @@ if st.button("🔍 Scan NIFTY + NSE Stocks",type="primary"):
                 nifty_daily=client.daily(nifty_id,"IDX_I","INDEX",datetime.now(IST).date()-timedelta(days=daily_lookback))
                 nifty_intraday=client.intraday(nifty_id,"IDX_I","INDEX",interval,end-timedelta(days=lookback),end)
                 nifty_regime=market_regime(nifty_daily)
-                nifty_signal=evaluate_symbol("NIFTY",nifty_intraday,nifty_daily,nifty_regime,strategy=strategy)
+                nifty_signal=evaluate_symbol("NIFTY",nifty_intraday,nifty_daily,nifty_regime,strategy=strategy,enforce_btst_window=False)
             except Exception as nifty_error:
                 st.warning(f"NIFTY data unavailable: {nifty_error}. Stock scan will continue without index confirmation.")
             st.session_state["nifty_regime"]=nifty_regime
@@ -146,7 +146,7 @@ if st.button("🔍 Scan NIFTY + NSE Stocks",type="primary"):
                     daily=client.daily(item["security_id"],"NSE_EQ","EQUITY",datetime.now(IST).date()-timedelta(days=daily_lookback))
                     diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Data OK" if len(intra)>=220 and len(daily)>=205 else "Insufficient history"})
                     srs=relative_strength(daily,nifty_daily) if not nifty_daily.empty else None
-                    sig=evaluate_symbol(item["symbol"],intra,daily,nifty_regime,strategy=strategy,sector_relative_strength=srs)
+                    sig=evaluate_symbol(item["symbol"],intra,daily,nifty_regime,strategy=strategy,sector_relative_strength=srs,enforce_btst_window=False)
                     if sig:
                         sig["sector"]=item["sector"]
                         signals.append(sig)
@@ -195,6 +195,106 @@ if "stock_signals" in st.session_state:
     if st.session_state.get("stock_diagnostics"):
         with st.expander("Per-stock data diagnostics"):
             st.dataframe(pd.DataFrame(st.session_state["stock_diagnostics"]),use_container_width=True,hide_index=True)
+
+
+
+st.divider()
+st.subheader("🧭 NIFTY OPTIONS — BTST CALL / PUT")
+st.caption("NIFTY trend અને live option-chain liquidity પરથી CALL/PUT ઉમેદવાર પસંદ કરે છે. માત્ર screening; auto order નથી.")
+if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_options"):
+    try:
+        client = _dhan_client()
+        with st.spinner("NIFTY trend, expiry અને option chain તપાસી રહ્યા છીએ..."):
+            end = datetime.now(IST).replace(tzinfo=None)
+            nd = client.daily(nifty_id, "IDX_I", "INDEX", datetime.now(IST).date()-timedelta(days=daily_lookback))
+            ni = client.intraday(nifty_id, "IDX_I", "INDEX", interval, end-timedelta(days=lookback), end)
+            regime = market_regime(nd)
+            from indicators import add_indicators
+            ix = add_indicators(ni)
+            direction = "NEUTRAL"
+            if len(ix) >= 60:
+                z = ix.iloc[-1]
+                if z.close > z.ema20 > z.ema50 and z.rsi14 >= 50 and z.macd > z.macd_signal:
+                    direction = "BULLISH"
+                elif z.close < z.ema20 < z.ema50 and z.rsi14 <= 50 and z.macd < z.macd_signal:
+                    direction = "BEARISH"
+            if regime.get("regime") == direction:
+                direction = "STRONG " + direction
+            expiries = client.option_expiries(nifty_id, "IDX_I")
+            today = datetime.now(IST).date()
+            valid_expiries = []
+            for value in expiries:
+                try:
+                    dt = datetime.strptime(str(value), "%Y-%m-%d").date()
+                    if dt >= today:
+                        valid_expiries.append(dt)
+                except ValueError:
+                    pass
+            valid_expiries.sort()
+            if not valid_expiries:
+                raise ValueError("Dhan returned no current/future NIFTY expiry.")
+            expiry = valid_expiries[0].isoformat()
+            chain = client.option_chain(nifty_id, expiry, "IDX_I")
+            data = chain.get("data", {}) if isinstance(chain, dict) else {}
+            spot = float(data.get("last_price", 0) or 0)
+            oc = data.get("oc", {})
+            rows = []
+            if not isinstance(oc, dict) or spot <= 0:
+                raise ValueError("Dhan option-chain response has no valid spot/strike data.")
+            for strike_text, pair in oc.items():
+                try:
+                    strike = float(strike_text)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(pair, dict):
+                    continue
+                for key, label in (("ce", "CALL"), ("pe", "PUT")):
+                    leg = pair.get(key)
+                    if not isinstance(leg, dict):
+                        continue
+                    bid = float(leg.get("top_bid_price", 0) or 0)
+                    ask = float(leg.get("top_ask_price", 0) or 0)
+                    ltp = float(leg.get("last_price", 0) or 0)
+                    volume = int(leg.get("volume", 0) or 0)
+                    oi = int(leg.get("oi", 0) or 0)
+                    greeks = leg.get("greeks") or {}
+                    try:
+                        delta = float(greeks.get("delta", 0) or 0)
+                    except (TypeError, ValueError):
+                        delta = 0.0
+                    mid = (bid+ask)/2 if bid > 0 and ask > 0 else 0
+                    spread = (ask-bid)/mid if mid > 0 and ask >= bid else 999
+                    abs_delta = abs(delta)
+                    if bid > 0 and ask >= bid and ltp > 0 and volume > 0 and oi > 0 and spread <= 0.12 and 0.35 <= abs_delta <= 0.70:
+                        score = 30 + min(volume/100000, 20) + min(oi/1000000, 20) + max(0, 20-abs(abs_delta-0.55)*100) + max(0, 10-spread*100)
+                        rows.append({"Type":label,"Strike":strike,"Expiry":expiry,"LTP":round(ltp,2),"Bid":round(bid,2),"Ask":round(ask,2),"Spread %":round(spread*100,2),"Delta":round(delta,3),"Volume":volume,"OI":oi,"Score":round(score,1),"Distance":abs(strike-spot),"Security ID":leg.get("security_id")})
+            calls = sorted([r for r in rows if r["Type"]=="CALL"],key=lambda r:(-r["Score"],r["Distance"]))
+            puts = sorted([r for r in rows if r["Type"]=="PUT"],key=lambda r:(-r["Score"],r["Distance"]))
+            st.session_state["nifty_option_scan"] = {"spot":spot,"expiry":expiry,"direction":direction,"regime":regime,"calls":calls[:5],"puts":puts[:5]}
+    except Exception as e:
+        st.error(f"NIFTY option scan failed: {e}")
+
+if "nifty_option_scan" in st.session_state:
+    result = st.session_state["nifty_option_scan"]
+    st.metric("NIFTY Spot", f"{result['spot']:.2f}")
+    st.write(f"**Market direction:** {result['direction']} | **Daily regime:** {result['regime'].get('regime')} | **Expiry:** {result['expiry']}")
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**CALL candidates**")
+        if result["calls"]: st.dataframe(pd.DataFrame(result["calls"]),use_container_width=True,hide_index=True)
+        else: st.info("No CALL contract passed liquidity filters.")
+    with right:
+        st.markdown("**PUT candidates**")
+        if result["puts"]: st.dataframe(pd.DataFrame(result["puts"]),use_container_width=True,hide_index=True)
+        else: st.info("No PUT contract passed liquidity filters.")
+    preferred = "CALL" if "BULLISH" in result["direction"] else "PUT" if "BEARISH" in result["direction"] else None
+    best_list = result["calls"] if preferred=="CALL" else result["puts"] if preferred=="PUT" else []
+    if best_list:
+        best = best_list[0]
+        st.success(f"BTST preference: {preferred} {best['Strike']} • Entry reference ₹{best['Ask']:.2f} (Ask) • Liquidity score {best['Score']}/100")
+        st.caption("Ask price is a reference quote, not guaranteed execution. Premium risk controls are not yet backtested.")
+    else:
+        st.warning("NO CONFIRMED NIFTY BTST OPTION — trend neutral/mixed છે અથવા કોઈ contract liquidity checks પાસ કરતો નથી.")
 
 with st.expander("Historical Backtesting"):
     st.caption("Single-stock historical test; historical performance does not guarantee future results.")
