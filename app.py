@@ -270,7 +270,7 @@ if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_optio
                     mid = (bid+ask)/2 if bid > 0 and ask > 0 else 0
                     spread = (ask-bid)/mid if mid > 0 and ask >= bid else 999
                     abs_delta = abs(delta)
-                    if bid > 0 and ask >= bid and ltp > 0 and volume > 0 and oi > 0 and spread <= 0.12 and 0.35 <= abs_delta <= 0.70:
+                    if bid > 0 and ask >= bid and ltp > 0 and volume > 0 and oi > 0 and int(leg.get("top_bid_quantity",0) or 0) > 0 and int(leg.get("top_ask_quantity",0) or 0) > 0 and spread <= 0.12 and 0.35 <= abs_delta <= 0.70:
                         score = 30 + min(volume/100000, 20) + min(oi/1000000, 20) + max(0, 20-abs(abs_delta-0.55)*100) + max(0, 10-spread*100)
                         rows.append({"Type":label,"Strike":strike,"Expiry":expiry,"LTP":round(ltp,2),"Bid":round(bid,2),"Ask":round(ask,2),"Spread %":round(spread*100,2),"Delta":round(delta,3),"Volume":volume,"OI":oi,"Score":round(score,1),"Distance":abs(strike-spot),"Security ID":leg.get("security_id")})
             calls = sorted([r for r in rows if r["Type"]=="CALL"],key=lambda r:(-r["Score"],r["Distance"]))
