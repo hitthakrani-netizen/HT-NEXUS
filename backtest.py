@@ -149,7 +149,7 @@ def run_backtest(
         daily_available = daily_available.loc[[idx.date() < current_day for idx in daily_available.index]]
         if len(daily_available) < 60:
             continue
-        regime = market_regime(daily_available)
+        regime = {"regime": "STOCK_ONLY", "reason": "NIFTY-independent historical test"}
         sig = _signal_at(intra, daily_available, regime, strategy, i)
         if sig is None:
             continue
