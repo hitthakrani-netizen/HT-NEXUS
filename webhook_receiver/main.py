@@ -5,13 +5,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 import psycopg
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 app = FastAPI(title="HT NEXUS TradingView Webhook Receiver", version="1.0.0")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET", "").strip()
+WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET", "").strip()\nDASHBOARD_API_KEY = os.getenv("DASHBOARD_API_KEY", "").strip()
 
 
 def db_connect():
