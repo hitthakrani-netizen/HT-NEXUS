@@ -103,7 +103,7 @@ if st.button("🔍 Scan NSE Stocks",type="primary"):
                         sig["sector"]=item["sector"]
                         signals.append(sig)
                 except Exception as e:
-                    diagnostics.append({"Stock":item["symbol"],"Intraday candles":0,"Daily candles":0,"Status":str(e)[:160]})
+                    diagnostics.append({"Stock":item["symbol"],"Intraday candles":0,"Daily candles":0,"Status":str(e)[:500]})
                 progress.progress((i+1)/max(len(universe),1))
         st.session_state["stock_signals"]=signals
         st.session_state["stock_diagnostics"]=diagnostics
@@ -208,7 +208,17 @@ if "stock_signals" in st.session_state:
             except Exception as e:
                 st.error(f"Live option-chain check failed: {e}")
     else:
-        st.warning("No stock passed the confirmation rules in this scan. This is a genuine NO TRADE result, not an index signal.")
+        diagnostics = st.session_state.get("stock_diagnostics", [])
+        all_data_failed = bool(diagnostics) and all(
+            int(d.get("Intraday candles", 0) or 0) == 0
+            and int(d.get("Daily candles", 0) or 0) == 0
+            and str(d.get("Status", "")).startswith(("Dhan rejected", "Network error", "Dhan HTTP", "Dhan API"))
+            for d in diagnostics
+        )
+        if all_data_failed:
+            st.error("DATA ERROR — Dhan rejected the market-data requests for every stock. No strategy confirmation was possible. This is NOT a genuine NO TRADE result. Check the full per-stock error below before relying on this scan.")
+        else:
+            st.warning("No stock passed the confirmation rules in this scan. This is a genuine NO TRADE result, not an index signal.")
     if st.session_state.get("stock_diagnostics"):
         with st.expander("Per-stock data diagnostics"):
             st.dataframe(pd.DataFrame(st.session_state["stock_diagnostics"]),use_container_width=True,hide_index=True)
