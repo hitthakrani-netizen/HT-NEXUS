@@ -1,4 +1,4 @@
-"""Weighted stock-only BTST/SWING signal engine. No orders are placed."""
+"""NIFTY-filtered NSE stock BTST/SWING signal engine. No orders are placed."""
 from __future__ import annotations
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
