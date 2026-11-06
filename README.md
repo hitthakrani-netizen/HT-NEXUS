@@ -118,3 +118,10 @@ The scanner does not require Render or a paid TradingView webhook plan. It uses 
 The app scans NIFTY 50 and the configured NSE cash-stock universe when the user presses **Scan NSE Stocks**. NIFTY daily regime filters stock direction, and relative strength versus NIFTY contributes to ranking. NIFTY data errors are shown separately and the stock scan continues with neutral index context. BTST is time-gated to 3:15–3:29 PM IST; SWING can be scanned outside that window. The app is read-only and does not place orders.
 
 NIFTY 50 default Dhan ID 13 in segment IDX_I is supported by Dhan instrument references; verify the ID if Dhan returns a data error. Setup scores are technical confluence scores, not probabilities or guarantees. Backtest and paper-test before considering any live trade.
+
+
+## Stock Options CE/PE BTST panel
+
+After running the NSE stock BTST/SWING scan, select a stock and run **Scan STOCK CE / PE**. The scanner requests the stock's active F&O expiry and option chain from DhanHQ using the NSE_FNO underlying segment. A LONG stock signal maps to CE/CALL; a SHORT stock signal maps to PE/PUT. The panel filters for live bid/ask depth, volume, open interest, spread and delta, then displays indicative buy (ask), 15% premium stop, Target 1 (1R) and Target 2 (2R). If the stock has no active F&O contracts or no liquid contract passes the filters, it displays no trade rather than forcing a recommendation.
+
+The dashboard includes a mobile-responsive visual layout. On Android Chrome, use the browser menu and choose **Add to Home screen** (or **Install app**, if offered) to create a home-screen shortcut. This remains a Streamlit web app, not a native APK. Option-chain values and formula-based targets are indicative, not guaranteed fills or tested profit forecasts. No orders are placed.
