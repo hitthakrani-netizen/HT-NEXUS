@@ -220,6 +220,8 @@ if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_optio
                     direction = "BEARISH"
             if regime.get("regime") == direction:
                 direction = "STRONG " + direction
+            elif regime.get("regime") in ("BULLISH", "BEARISH") and direction in ("BULLISH", "BEARISH") and regime.get("regime") != direction:
+                direction = "MIXED (daily/intraday conflict)"
             expiries = client.option_expiries(nifty_id, "IDX_I")
             today = datetime.now(IST).date()
             valid_expiries = []
