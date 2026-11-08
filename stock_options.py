@@ -62,7 +62,7 @@ def scan_stock_option_chain(client, symbol, security_id, bias=None):
             previous_oi = int(leg.get("previous_oi", 0) or 0)
             previous_volume = int(leg.get("previous_volume", 0) or 0)
             previous_close = float(leg.get("previous_close_price", 0) or 0)
-            oi_change = oi - previous_oi
+            oi_change = oi - previous_oi if previous_oi > 0 else 0
             premium_change_pct = ((ltp / previous_close) - 1) * 100 if previous_close > 0 else 0.0
             bid_qty = int(leg.get("top_bid_quantity", 0) or 0)
             ask_qty = int(leg.get("top_ask_quantity", 0) or 0)
@@ -94,7 +94,7 @@ def scan_stock_option_chain(client, symbol, security_id, bias=None):
                 "premium_change":round(sum(r["Premium Change %"] for r in group)/len(group),2),
                 "depth":round(sum(r["Depth Imbalance"]*(r["Bid Qty"]+r["Ask Qty"]) for r in group)/depth_total,3) if depth_total else 0.0}
     call_flow, put_flow = flow("CALL"), flow("PUT")
-    flow_bias = "CALL SIDE STRONGER" if call_flow["premium_change"] > put_flow["premium_change"] and call_flow["oi_change"] > 0 and call_flow["depth"] > 0 else "PUT SIDE STRONGER" if put_flow["premium_change"] > call_flow["premium_change"] and put_flow["oi_change"] > 0 and put_flow["depth"] < 0 else "MIXED / NO CLEAR EDGE"
+    flow_bias = "CALL SIDE STRONGER" if call_flow["premium_change"] > put_flow["premium_change"] and call_flow["oi_change"] > 0 and call_flow["depth"] > 0 else "PUT SIDE STRONGER" if put_flow["premium_change"] > call_flow["premium_change"] and put_flow["oi_change"] > 0 and put_flow["depth"] > 0 else "MIXED / NO CLEAR EDGE"
     return {"symbol": symbol, "spot": spot, "expiry": expiry, "bias": bias,
             "calls": calls, "puts": puts, "preferred": preferred, "call_flow":call_flow,
             "put_flow":put_flow, "flow_bias":flow_bias, "near_strikes":near_strikes,
