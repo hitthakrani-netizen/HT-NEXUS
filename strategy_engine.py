@@ -101,8 +101,39 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
         }
         score = sum(points.values())
         confirmations = sum(bool(checks[k]) for k in ("momentum", "vwap", "volume", "breakout", "mtf"))
-        # Avoid weak one-confirmation watchlist entries being treated as BTST candidates.
-        # Keep a moderate threshold (not the restrictive high-confidence gate).
+        btst_quality = {}
+        if strategy == "BTST":
+            # End-of-day strength using only candles available at scan time.
+            session = intraday.loc[[idx.date() == intraday.index[-1].date() for idx in intraday.index]]
+            if session.empty:
+                continue
+            session_high, session_low = float(session.high.max()), float(session.low.min())
+            session_close = float(session.close.iloc[-1])
+            day_range = max(session_high - session_low, 1e-9)
+            close_location = (session_close - session_low) / day_range
+            previous_close = float(daily.close.iloc[-1]) if len(daily) else 0.0
+            day_return_pct = ((session_close / previous_close) - 1) * 100 if previous_close > 0 else 0.0
+            last_30 = session.tail(6)
+            prior_bars = session.iloc[:-6]
+            last_30_volume = float(last_30.volume.sum())
+            typical_30_volume = float(prior_bars.volume.mean() * len(last_30)) if not prior_bars.empty else 0.0
+            late_volume_ratio = last_30_volume / typical_30_volume if typical_30_volume > 0 else 0.0
+            vwap_extension_pct = abs((session_close / float(last.vwap) - 1) * 100) if pd.notna(last.vwap) and float(last.vwap) > 0 else 999.0
+            btst_quality = {"Close location": round(close_location,3), "Day change %": round(day_return_pct,2),
+                            "Last 30m volume ratio": round(late_volume_ratio,2), "VWAP extension %": round(vwap_extension_pct,2)}
+            if side == "LONG":
+                score += 10 if close_location >= .80 else 5 if close_location >= .65 else 0
+                score += 5 if late_volume_ratio >= 1.20 else 0
+                score -= 5 if vwap_extension_pct > 2.5 else 0
+                if close_location < .50 or vwap_extension_pct > 4.0:
+                    continue
+            else:
+                weakness_location = 1.0 - close_location
+                score += 10 if weakness_location >= .80 else 5 if weakness_location >= .65 else 0
+                score += 5 if late_volume_ratio >= 1.20 else 0
+                score -= 5 if vwap_extension_pct > 2.5 else 0
+                if weakness_location < .50 or vwap_extension_pct > 4.0:
+                    continue
         if score < 55 or confirmations < 2:
             continue
         if sector_relative_strength is not None:
@@ -125,7 +156,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
             "target2": entry+(1.5*risk if side=="LONG" else -1.5*risk),
             "target3": target, "risk_reward": reward/risk, "score": round(score,1),
             "score_label": "STRONG" if score >= 80 else "QUALIFIED" if score >= MIN_QUALITY_SCORE and confirmations >= 2 else "WATCHLIST",
-            "reasons": reasons, "atr": atr_value, "checks": checks,
+            "reasons": reasons, "atr": atr_value, "checks": checks, "btst_quality": btst_quality,
             "sector_relative_strength": sector_relative_strength,
             "signal_time": str(intraday.index[-1]),
         })
