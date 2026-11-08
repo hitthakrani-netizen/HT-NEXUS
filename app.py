@@ -233,6 +233,8 @@ if st.button("🌐 Fetch NSE Market Data", key="fetch_nse_market_data"):
             ("OI Spurts", nse.oi_spurts),
             ("Volume Gainers", nse.volume_gainers),
             ("FII / DII", nse.fii_dii),
+            ("All Indices / India VIX", nse.all_indices),
+            ("NIFTY 50 Breadth", nse.equity_index),
         ]:
             try:
                 nse_snapshot[key] = fn()
@@ -247,7 +249,19 @@ if st.session_state.get("nse_market_snapshot") is not None:
     snap = st.session_state["nse_market_snapshot"]
     st.caption(f"Last fetch attempt: {st.session_state.get('nse_market_fetched_at','—')}")
     if snap:
-        for section in ("Most Active Contracts","Most Active Underlying","OI Spurts","Volume Gainers","FII / DII"):
+        indices = snap.get("All Indices / India VIX")
+        if indices is not None and not indices.empty:
+            name_col = next((x for x in indices.columns if str(x).lower() in ("index","indexname","index_name")), None)
+            if name_col:
+                vix_rows = indices[indices[name_col].astype(str).str.upper().str.contains("INDIA VIX", na=False)]
+                if not vix_rows.empty:
+                    st.markdown("**India VIX snapshot**")
+                    st.dataframe(vix_rows, use_container_width=True, hide_index=True)
+        breadth = snap.get("NIFTY 50 Breadth")
+        if breadth is not None and not breadth.empty:
+            st.markdown("**NIFTY 50 constituents / market breadth**")
+            st.dataframe(breadth.head(50), use_container_width=True, hide_index=True)
+        for section in ("Most Active Contracts","Most Active Underlying","OI Spurts","Volume Gainers","FII / DII","All Indices / India VIX"):
             frame = snap.get(section)
             if frame is not None and not frame.empty:
                 with st.expander(f"{section} ({len(frame)} rows)", expanded=(section=="Most Active Contracts")):
