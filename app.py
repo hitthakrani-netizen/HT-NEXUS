@@ -332,10 +332,37 @@ if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_optio
                         risk_per_unit = entry_price - stop_price
                         target1_price = round(entry_price + risk_per_unit, 2)
                         target2_price = round(entry_price + (2 * risk_per_unit), 2)
-                        rows.append({"Type":label,"Strike":strike,"Expiry":expiry,"LTP":round(ltp,2),"Buy Price (Ask)":round(entry_price,2),"Stop Loss":stop_price,"Target 1":target1_price,"Target 2":target2_price,"Spread %":round(spread*100,2),"Delta":round(delta,3),"Volume":volume,"OI":oi,"Score":round(score,1),"Distance":abs(strike-spot),"Security ID":leg.get("security_id")})
+                        previous_oi = int(leg.get("previous_oi", 0) or 0)
+                        previous_volume = int(leg.get("previous_volume", 0) or 0)
+                        previous_close = float(leg.get("previous_close_price", 0) or 0)
+                        oi_change = oi - previous_oi
+                        oi_change_pct = (oi_change / previous_oi * 100) if previous_oi > 0 else 0.0
+                        premium_change_pct = ((ltp / previous_close) - 1) * 100 if previous_close > 0 else 0.0
+                        volume_ratio = (volume / previous_volume) if previous_volume > 0 else 0.0
+                        bid_qty = int(leg.get("top_bid_quantity", 0) or 0)
+                        ask_qty = int(leg.get("top_ask_quantity", 0) or 0)
+                        depth_imbalance = ((bid_qty - ask_qty) / (bid_qty + ask_qty)) if (bid_qty + ask_qty) > 0 else 0.0
+                        rows.append({"Type":label,"Strike":strike,"Expiry":expiry,"LTP":round(ltp,2),"Buy Price (Ask)":round(entry_price,2),"Stop Loss":stop_price,"Target 1":target1_price,"Target 2":target2_price,"Spread %":round(spread*100,2),"Delta":round(delta,3),"Volume":volume,"Previous Volume":previous_volume,"Volume vs Prev Day":round(volume_ratio,2),"OI":oi,"Previous OI":previous_oi,"OI Change":oi_change,"OI Change %":round(oi_change_pct,2),"Premium Change %":round(premium_change_pct,2),"Bid Qty":bid_qty,"Ask Qty":ask_qty,"Depth Imbalance":round(depth_imbalance,3),"Score":round(score,1),"Distance":abs(strike-spot),"Security ID":leg.get("security_id")})
             calls = sorted([r for r in rows if r["Type"]=="CALL"],key=lambda r:(-r["Score"],r["Distance"]))
             puts = sorted([r for r in rows if r["Type"]=="PUT"],key=lambda r:(-r["Score"],r["Distance"]))
-            st.session_state["nifty_option_scan"] = {"spot":spot,"expiry":expiry,"direction":direction,"regime":regime,"calls":calls[:5],"puts":puts[:5]}
+            # Compare the five closest strikes to spot, rather than far OTM contracts.
+            near_strikes = sorted({r["Strike"] for r in rows}, key=lambda strike: abs(strike-spot))[:5]
+            near_rows = [r for r in rows if r["Strike"] in near_strikes]
+            def flow_summary(side):
+                group = [r for r in near_rows if r["Type"] == side]
+                if not group:
+                    return {"volume":0,"oi_change":0,"premium_change":0.0,"depth":0.0,"contracts":0}
+                total_depth = sum(r["Bid Qty"] + r["Ask Qty"] for r in group)
+                return {
+                    "volume":sum(r["Volume"] for r in group),
+                    "oi_change":sum(r["OI Change"] for r in group),
+                    "premium_change":round(sum(r["Premium Change %"] for r in group)/len(group),2),
+                    "depth":round(sum(r["Depth Imbalance"]*(r["Bid Qty"]+r["Ask Qty"]) for r in group)/total_depth,3) if total_depth else 0.0,
+                    "contracts":len(group),
+                }
+            call_flow, put_flow = flow_summary("CALL"), flow_summary("PUT")
+            flow_bias = "CALL SIDE STRONGER" if call_flow["premium_change"] > put_flow["premium_change"] and call_flow["oi_change"] > 0 and call_flow["depth"] > 0 else "PUT SIDE STRONGER" if put_flow["premium_change"] > call_flow["premium_change"] and put_flow["oi_change"] > 0 and put_flow["depth"] > 0 else "MIXED / NO CLEAR EDGE"
+            st.session_state["nifty_option_scan"] = {"spot":spot,"expiry":expiry,"direction":direction,"regime":regime,"calls":calls[:5],"puts":puts[:5],"call_flow":call_flow,"put_flow":put_flow,"flow_bias":flow_bias,"near_strikes":near_strikes}
     except Exception as e:
         st.error(f"NIFTY option scan failed: {e}")
 
@@ -346,6 +373,21 @@ if "nifty_option_scan" in st.session_state:
     intraday_direction = result["direction"]
     aligned = daily_direction == intraday_direction and intraday_direction in ("BULLISH", "BEARISH")
     st.write(f"**Daily:** {daily_direction} | **Intraday:** {intraday_direction} | **Expiry:** {result['expiry']}")
+    st.markdown("**ATM નજીક Option Flow (Spotની આસપાસના 5 strikes)**")
+    flow_cols = st.columns(2)
+    with flow_cols[0]:
+        st.metric("CALL premium change", f"{result['call_flow']['premium_change']:+.2f}%")
+        st.caption(f"OI change: {result['call_flow']['oi_change']:,} | Volume: {result['call_flow']['volume']:,} | Bid/Ask depth: {result['call_flow']['depth']:+.3f}")
+    with flow_cols[1]:
+        st.metric("PUT premium change", f"{result['put_flow']['premium_change']:+.2f}%")
+        st.caption(f"OI change: {result['put_flow']['oi_change']:,} | Volume: {result['put_flow']['volume']:,} | Bid/Ask depth: {result['put_flow']['depth']:+.3f}")
+    if result["flow_bias"] == "CALL SIDE STRONGER":
+        st.success("Option flow: CALL side stronger — આ એક supporting clue છે, એકલું BUY signal નથી.")
+    elif result["flow_bias"] == "PUT SIDE STRONGER":
+        st.success("Option flow: PUT side stronger — આ એક supporting clue છે, એકલું BUY signal નથી.")
+    else:
+        st.info("Option flow mixed છે — સ્પષ્ટ CALL/PUT dominance નથી.")
+    st.caption("OI change અને premium change previous session સામે છે; depth snapshot છે. આ data પરથી એકલા buyer/seller ની ઓળખ થતી નથી.")
     if aligned:
         st.success("MATCH — Daily અને Intraday એક જ દિશામાં છે.")
     else:
