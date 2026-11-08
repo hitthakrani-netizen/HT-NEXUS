@@ -190,6 +190,9 @@ if "stock_signals" in st.session_state:
         df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target 1":round(best.get("target1",best["target"]),2),"Target 2":round(best.get("target2",best["target"]),2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
         st.dataframe(df,use_container_width=True,hide_index=True)
         st.write(best["reasons"])
+        if best.get("strategy") == "BTST" and best.get("btst_quality"):
+            st.markdown("**BTST Closing Quality**")
+            st.json(best["btst_quality"])
         if best.get("score_label") in ("STRONG","QUALIFIED"):
             st.success(f"Qualified setup: {best['symbol']} | Entry ₹{best['entry']:.2f} | SL ₹{best['stop_loss']:.2f} | Target ₹{best['target']:.2f} | R:R 1:{best['risk_reward']:.2f}")
         else:
@@ -237,6 +240,21 @@ if "stock_option_result" in st.session_state and st.session_state["stock_option_
     sr = st.session_state["stock_option_result"]
     st.metric(f"{sr['symbol']} Spot", f"₹{sr['spot']:.2f}")
     st.caption(f"Expiry: {sr['expiry']} • Stock direction: {sr['bias'] or 'No confirmed stock signal'}")
+    st.markdown("**ATM નજીક Stock Option Flow (spotની આસપાસના 5 strikes)**")
+    flow_cols = st.columns(2)
+    with flow_cols[0]:
+        st.metric("CE premium change", f"{sr['call_flow']['premium_change']:+.2f}%")
+        st.caption(f"OI change: {sr['call_flow']['oi_change']:,} | Volume: {sr['call_flow']['volume']:,} | Depth: {sr['call_flow']['depth']:+.3f}")
+    with flow_cols[1]:
+        st.metric("PE premium change", f"{sr['put_flow']['premium_change']:+.2f}%")
+        st.caption(f"OI change: {sr['put_flow']['oi_change']:,} | Volume: {sr['put_flow']['volume']:,} | Depth: {sr['put_flow']['depth']:+.3f}")
+    if sr["flow_bias"] == "CALL SIDE STRONGER":
+        st.success("Stock CE flow stronger — supporting evidence only.")
+    elif sr["flow_bias"] == "PUT SIDE STRONGER":
+        st.success("Stock PE flow stronger — supporting evidence only.")
+    else:
+        st.info("Stock option flow mixed — no clear CE/PE edge.")
+    st.caption("Previous OI/close comparison and live depth are supporting clues, not proof of net buyer identity.")
     left, right = st.columns(2)
     with left:
         st.markdown("**CALL / CE candidates**")
