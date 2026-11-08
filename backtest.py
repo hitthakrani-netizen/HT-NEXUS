@@ -30,14 +30,15 @@ def _signal_at(intra: pd.DataFrame, daily: pd.DataFrame, regime: dict, strategy:
         local_time = history.index[-1].time().replace(tzinfo=None)
         if not (_time(15, 15) <= local_time <= _time(15, 29)):
             return None
-    # Calling as SWING avoids comparing historical timestamps with today's wall clock.
-    # All signal filters, score thresholds and confirmations now come from the live engine.
+    # Reuse the requested strategy's exact filters (including BTST close-strength checks).
+    # enforce_btst_window stays False because the historical timestamp was checked above.
     signal = evaluate_symbol(
         "BACKTEST",
         history,
         daily,
         regime or {"regime": "STOCK_ONLY", "reason": "Historical stock-only test"},
-        strategy="SWING",
+        strategy=strategy,
+        enforce_btst_window=False,
     )
     if signal is None:
         return None
