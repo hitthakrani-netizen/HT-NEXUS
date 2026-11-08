@@ -80,12 +80,8 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
         daily_trend = bool(day.close > day.ema20 > day.ema50) if side == "LONG" else bool(day.close < day.ema20 < day.ema50)
         if not daily_trend:
             continue
-        # NIFTY regime is a hard directional filter for both BTST and SWING.
-        regime_name = str((regime or {}).get("regime", "NEUTRAL")).upper()
-        if regime_name == "BULLISH" and side == "SHORT":
-            continue
-        if regime_name == "BEARISH" and side == "LONG":
-            continue
+        # NIFTY regime is context only, never a mandatory stock-signal filter.
+        # This keeps stock BTST/SWING signals independent of index direction.
         if (side == "LONG" and day.rsi14 < 45) or (side == "SHORT" and day.rsi14 > 55):
             continue
         checks = _intraday_checks(intraday, side)
@@ -105,7 +101,9 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
         }
         score = sum(points.values())
         confirmations = sum(bool(checks[k]) for k in ("momentum", "vwap", "volume", "breakout", "mtf"))
-        if score < 45 or confirmations < 1:
+        # Avoid weak one-confirmation watchlist entries being treated as BTST candidates.
+        # Keep a moderate threshold (not the restrictive high-confidence gate).
+        if score < 55 or confirmations < 2:
             continue
         if sector_relative_strength is not None:
             aligned = sector_relative_strength > 0 if side == "LONG" else sector_relative_strength < 0
