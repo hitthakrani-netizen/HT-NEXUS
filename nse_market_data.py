@@ -18,6 +18,8 @@ ENDPOINTS = {
     "oi_spurts": "/api/live-analysis-oi-spurts",
     "volume_gainers": "/api/live-analysis-volume-gainers",
     "fii_dii": "/api/fiidiiTradeReact",
+    "all_indices": "/api/allIndices",
+    "equity_indices": "/api/equity-stockIndices",
 }
 
 class NSEDataError(RuntimeError):
@@ -111,6 +113,20 @@ class NSEMarketData:
         df = pd.DataFrame(self._records(body))
         if df.empty:
             raise NSEDataError("NSE Volume Gainers returned no rows.")
+        return df
+
+    def all_indices(self) -> pd.DataFrame:
+        body = self._get("all_indices")
+        df = pd.DataFrame(self._records(body))
+        if df.empty:
+            raise NSEDataError("NSE indices snapshot returned no rows.")
+        return df
+
+    def equity_index(self, index_name: str = "NIFTY 50") -> pd.DataFrame:
+        body = self._get("equity_indices", {"index": index_name})
+        df = pd.DataFrame(self._records(body))
+        if df.empty:
+            raise NSEDataError(f"NSE {index_name} constituents returned no rows.")
         return df
 
     def fii_dii(self) -> pd.DataFrame:
