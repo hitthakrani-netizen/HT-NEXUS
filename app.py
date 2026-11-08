@@ -8,6 +8,7 @@ from market_data import DhanDataClient, generate_access_token, parse_universe
 from strategy_engine import evaluate_symbol, market_regime, relative_strength
 from backtest import run_backtest
 from stock_options import scan_stock_option_chain
+from nse_market_data import NSEMarketData, NSEDataError
 
 IST=ZoneInfo("Asia/Kolkata")
 st.set_page_config(page_title="HT NEXUS PRO", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
@@ -217,6 +218,59 @@ if "stock_signals" in st.session_state:
             st.dataframe(pd.DataFrame(st.session_state["stock_diagnostics"]),use_container_width=True,hide_index=True)
 
 
+
+st.divider()
+st.subheader("🏛️ NSE OFFICIAL MARKET DATA — MARKET INTELLIGENCE")
+st.caption("NSE websiteના Most Active Contracts, Most Active Underlying, OI Spurts, Volume Gainers અને FII/DII reports. આ data ઉપલબ્ધ હોય ત્યારે જ બતાવવામાં આવશે; blocked/late dataને live signal માનવામાં નહીં આવે.")
+if st.button("🌐 Fetch NSE Market Data", key="fetch_nse_market_data"):
+    try:
+        nse = NSEMarketData()
+        nse_snapshot = {}
+        errors = {}
+        for key, fn in [
+            ("Most Active Contracts", nse.most_active_contracts),
+            ("Most Active Underlying", nse.most_active_underlying),
+            ("OI Spurts", nse.oi_spurts),
+            ("Volume Gainers", nse.volume_gainers),
+            ("FII / DII", nse.fii_dii),
+        ]:
+            try:
+                nse_snapshot[key] = fn()
+            except Exception as ex:
+                errors[key] = str(ex)
+        st.session_state["nse_market_snapshot"] = nse_snapshot
+        st.session_state["nse_market_errors"] = errors
+        st.session_state["nse_market_fetched_at"] = datetime.now(IST).strftime("%d-%b-%Y %H:%M:%S IST")
+    except Exception as ex:
+        st.error(f"NSE Market Data fetch failed: {ex}")
+if st.session_state.get("nse_market_snapshot") is not None:
+    snap = st.session_state["nse_market_snapshot"]
+    st.caption(f"Last fetch attempt: {st.session_state.get('nse_market_fetched_at','—')}")
+    if snap:
+        for section in ("Most Active Contracts","Most Active Underlying","OI Spurts","Volume Gainers","FII / DII"):
+            frame = snap.get(section)
+            if frame is not None and not frame.empty:
+                with st.expander(f"{section} ({len(frame)} rows)", expanded=(section=="Most Active Contracts")):
+                    view = frame.copy()
+                    # Prioritise NIFTY rows in the derivatives table, while retaining all returned rows.
+                    if section == "Most Active Contracts":
+                        symbol_col = next((x for x in view.columns if str(x).lower() in ("symbol","underlying","ticker")), None)
+                        if symbol_col:
+                            nifty_rows = view[view[symbol_col].astype(str).str.upper().eq("NIFTY")]
+                            if not nifty_rows.empty:
+                                st.markdown("**NIFTY contracts**")
+                                st.dataframe(nifty_rows.head(30), use_container_width=True, hide_index=True)
+                                st.markdown("**Other most-active contracts**")
+                                view = view[~view.index.isin(nifty_rows.index)]
+                    st.dataframe(view.head(50), use_container_width=True, hide_index=True)
+    else:
+        st.warning("NSEમાંથી કોઈ વિભાગનો usable data મળ્યો નથી. આ NO TRADE નથી; NSE data unavailable છે.")
+    errs = st.session_state.get("nse_market_errors", {})
+    if errs:
+        with st.expander("NSE data availability / errors"):
+            for section, error in errs.items():
+                st.warning(f"{section}: {error}")
+st.caption("NSE market data may be delayed, rate-limited or changed by NSE. OI/volume/turnover do not identify buyer vs seller by themselves. Cross-check with Dhan live option chain before a trade.")
 
 st.divider()
 st.subheader("📊 STOCK OPTIONS — CE / PE BTST")
