@@ -359,7 +359,8 @@ if "nifty_option_scan" in st.session_state:
         st.markdown("**PUT candidates**")
         if result["puts"]: st.dataframe(pd.DataFrame(result["puts"]),use_container_width=True,hide_index=True)
         else: st.info("No PUT contract passed liquidity filters.")
-    preferred = "CALL" if result["direction"] == "BULLISH" else "PUT" if result["direction"] == "BEARISH" else None
+    # Only allow a NIFTY option preference when Daily and Intraday directions match.
+    preferred = ("CALL" if result["direction"] == "BULLISH" else "PUT") if aligned else None
     best_list = result["calls"] if preferred=="CALL" else result["puts"] if preferred=="PUT" else []
     if best_list:
         best = best_list[0]
