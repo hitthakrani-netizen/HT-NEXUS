@@ -134,6 +134,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
                 score -= 5 if vwap_extension_pct > 2.5 else 0
                 if weakness_location < .50 or vwap_extension_pct > 4.0:
                     continue
+        score = min(100.0, score)
         if score < 55 or confirmations < 2:
             continue
         if sector_relative_strength is not None:
