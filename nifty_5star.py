@@ -53,12 +53,26 @@ def evaluate_nifty_5star(chart_5m: pd.DataFrame, volume_1m: pd.DataFrame,
     df = df[~df.index.duplicated(keep="last")]
     vol = volume_1m.copy().sort_index()
     vol = vol[~vol.index.duplicated(keep="last")]
-    # Aggregate actual 1-minute volume into completed 3-minute buckets.
-    v3 = pd.to_numeric(vol["volume"], errors="coerce").fillna(0).resample("3min", origin="start_day", label="right", closed="left").sum()
+    # Normalize both Dhan candle indexes to IST before resampling/alignment.
+    try:
+        df.index = pd.DatetimeIndex(pd.to_datetime(df.index))
+        vol.index = pd.DatetimeIndex(pd.to_datetime(vol.index))
+        df.index = df.index.tz_localize("Asia/Kolkata") if df.index.tz is None else df.index.tz_convert("Asia/Kolkata")
+        vol.index = vol.index.tz_localize("Asia/Kolkata") if vol.index.tz is None else vol.index.tz_convert("Asia/Kolkata")
+    except Exception as exc:
+        return {"status":"DATA_UNAVAILABLE","reason":f"Invalid candle timestamps: {exc}"}
+    df = df[~df.index.duplicated(keep="last")]
+    vol = vol[~vol.index.duplicated(keep="last")]
+    raw_volume = pd.to_numeric(vol["volume"], errors="coerce").fillna(0.0)
+    if raw_volume.empty or float(raw_volume.abs().sum()) <= 0:
+        return {"status":"DATA_UNAVAILABLE","reason":"NIFTY 50 Spot 1-minute volume is zero/unavailable from Dhan; the 5-STAR volume condition cannot be verified."}
+    # Aggregate actual NIFTY 50 Spot 1-minute volume into completed 3-minute buckets.
+    v3 = raw_volume.resample("3min", origin="start_day", label="right", closed="left").sum()
     v3 = v3[v3.index.time <= pd.Timestamp("15:00").time()]
-    # Pine's request.security(..., "3", volume, gaps_off, lookahead_off):
-    # carry the most recently completed 3-minute value onto the chart bars.
+    # Map the latest completed 3-minute bucket to each completed 5-minute chart bar.
     df["vol3m"] = v3.reindex(df.index + pd.Timedelta(minutes=5), method="ffill")
+    if df["vol3m"].notna().sum() == 0:
+        return {"status":"DATA_UNAVAILABLE","reason":"NIFTY 50 Spot 1-minute volume timestamps do not overlap the 5-minute candles."}
     df["ema21"] = df["close"].ewm(span=21, adjust=False, min_periods=21).mean()
     typical = (df["high"] + df["low"] + df["close"]) / 3.0
     vol_chart = pd.to_numeric(df["volume"], errors="coerce").fillna(0.0)
@@ -69,10 +83,6 @@ def evaluate_nifty_5star(chart_5m: pd.DataFrame, volume_1m: pd.DataFrame,
     df["sell"] = (df["close"]<df["ema21"]) & (df["close"]<df["vwap"]) & (df["close"]<df["vwma20"]) & (df["close"]<df["supertrend"]) & (df["vol3m"]>=min_3m_volume)
     # Keep only fully closed candles and the script's 09:31-15:00 time window.
     now = pd.Timestamp.now(tz="Asia/Kolkata")
-    if df.index.tz is None:
-        df.index = df.index.tz_localize("Asia/Kolkata")
-    else:
-        df.index = df.index.tz_convert("Asia/Kolkata")
     df = df[(df.index.time >= pd.Timestamp("09:31").time()) & (df.index.time <= pd.Timestamp("15:00").time())]
     df = df[df.index < now.floor("5min")]
     if df.empty:
