@@ -352,10 +352,13 @@ if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_optio
             end = datetime.now(IST).replace(tzinfo=None)
             nd = client.daily(nifty_id, "IDX_I", "INDEX", datetime.now(IST).date()-timedelta(days=daily_lookback))
             ni = client.intraday(nifty_id, "IDX_I", "INDEX", interval, end-timedelta(days=lookback), end)
-            # 5-STAR Pine: 5m chart-price conditions + 3m volume from Dhan 1m candles.
-            nifty_5m = client.intraday(nifty_id, "IDX_I", "INDEX", "5", end-timedelta(days=10), end)
-            nifty_1m = client.intraday(nifty_id, "IDX_I", "INDEX", "1", end-timedelta(days=3), end)
-            st.session_state["nifty_5star"] = evaluate_nifty_5star(nifty_5m, nifty_1m)
+            # 5-STAR is an optional NIFTY-only add-on: its data failure must never stop the option-chain scan.
+            try:
+                nifty_5m = client.intraday(nifty_id, "IDX_I", "INDEX", "5", end-timedelta(days=10), end)
+                nifty_1m = client.intraday(nifty_id, "IDX_I", "INDEX", "1", end-timedelta(days=3), end)
+                st.session_state["nifty_5star"] = evaluate_nifty_5star(nifty_5m, nifty_1m)
+            except Exception as five_error:
+                st.session_state["nifty_5star"] = {"status":"DATA_UNAVAILABLE","reason":f"5-STAR data fetch failed: {five_error}"}
             regime = market_regime(nd)
             from indicators import add_indicators
             ix = add_indicators(ni)
