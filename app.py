@@ -148,17 +148,12 @@ if st.button("📈 Scan STOCKS — BTST / SWING",type="primary"):
             try:
                 nifty_daily=client.daily(nifty_id,"IDX_I","INDEX",datetime.now(IST).date()-timedelta(days=daily_lookback))
                 nifty_intraday=client.intraday(nifty_id,"IDX_I","INDEX",interval,end-timedelta(days=lookback),end)
-                # Pine price rules use chart timeframe; HT NEXUS uses 5m and separately aggregates 1m volume into 3m.
-                nifty_5m=client.intraday(nifty_id,"IDX_I","INDEX","5",end-timedelta(days=10),end)
-                nifty_1m=client.intraday(nifty_id,"IDX_I","INDEX","1",end-timedelta(days=3),end)
-                nifty_5star=evaluate_nifty_5star(nifty_5m,nifty_1m)
                 nifty_regime=market_regime(nifty_daily)
                 nifty_signal=evaluate_symbol("NIFTY",nifty_intraday,nifty_daily,nifty_regime,strategy=strategy,enforce_btst_window=False)
             except Exception as nifty_error:
                 st.warning(f"NIFTY data unavailable: {nifty_error}. Stock scan will continue without index confirmation.")
             st.session_state["nifty_regime"]=nifty_regime
             st.session_state["nifty_signal"]=nifty_signal
-            st.session_state["nifty_5star"]=nifty_5star if "nifty_5star" in locals() else {"status":"DATA_UNAVAILABLE","reason":"5-STAR candle fetch failed."}
             st.session_state["nifty_daily"]=nifty_daily
             for i,item in enumerate(universe):
                 try:
@@ -189,19 +184,6 @@ if "stock_signals" in st.session_state:
         st.success(f"NIFTY {ns['side']} setup • Score {ns['score']}/100 • Entry {ns['entry']:.2f} • SL {ns['stop_loss']:.2f} • Target {ns['target']:.2f}")
     else:
         st.info("NIFTY પર હાલ બધા confirmation મળ્યા નથી — index પર NO TRADE.")
-    st.markdown("### ⭐ NIFTY 5-STAR Indicator (તમારી આપેલી Pine Script)")
-    five = st.session_state.get("nifty_5star", {"status":"DATA_UNAVAILABLE","reason":"Run NIFTY scan to calculate."})
-    if five.get("status") == "SIGNAL":
-        fs = five["signal"]
-        st.success(f"5-STAR {fs['side']} SIGNAL • {fs['time']} IST • NIFTY Entry {fs['entry']:.2f} • SL {fs['stop_loss']:.2f} • T1 {fs['target1']:.2f} • T2 {fs['target2']:.2f} • 3m Volume {fs['volume_3m']:,}")
-        st.caption(f"EMA21 ₹{fs['ema21']:.2f} • VWAP ₹{fs['vwap']:.2f} • VWMA20 ₹{fs['vwma20']:.2f} • Supertrend ₹{fs['supertrend']:.2f} • {fs['signal_timeframe']}")
-    elif five.get("status") == "NO_SIGNAL":
-        st.info(f"5-STAR: NO SIGNAL — {five.get('reason','')}")
-        if five.get("last_close") is not None:
-            st.caption(f"Last NIFTY close ₹{five['last_close']:.2f} • latest completed 3m volume {five.get('last_3m_volume',0):,}")
-    else:
-        st.warning(f"5-STAR DATA UNAVAILABLE — {five.get('reason','Check Dhan candle data.')}")
-    st.caption("Rules from your Pine file: EMA21 + VWAP + VWMA20 + Supertrend(10,3) + 3m volume ≥125,000; confirmed bar; 09:31–15:00; first signal/day.")
     signals=st.session_state["stock_signals"]
     st.subheader("Strongest NSE Stock BTST / SWING Signal")
     if signals:
@@ -370,6 +352,10 @@ if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_optio
             end = datetime.now(IST).replace(tzinfo=None)
             nd = client.daily(nifty_id, "IDX_I", "INDEX", datetime.now(IST).date()-timedelta(days=daily_lookback))
             ni = client.intraday(nifty_id, "IDX_I", "INDEX", interval, end-timedelta(days=lookback), end)
+            # 5-STAR Pine: 5m chart-price conditions + 3m volume from Dhan 1m candles.
+            nifty_5m = client.intraday(nifty_id, "IDX_I", "INDEX", "5", end-timedelta(days=10), end)
+            nifty_1m = client.intraday(nifty_id, "IDX_I", "INDEX", "1", end-timedelta(days=3), end)
+            st.session_state["nifty_5star"] = evaluate_nifty_5star(nifty_5m, nifty_1m)
             regime = market_regime(nd)
             from indicators import add_indicators
             ix = add_indicators(ni)
@@ -474,6 +460,17 @@ if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_optio
 if "nifty_option_scan" in st.session_state:
     result = st.session_state["nifty_option_scan"]
     st.metric("NIFTY Spot", f"{result['spot']:.2f}")
+    st.markdown("### ⭐ NIFTY 5-STAR Indicator (તમારી આપેલી Pine Script)")
+    five = st.session_state.get("nifty_5star", {"status":"DATA_UNAVAILABLE","reason":"Run NIFTY option scan to calculate."})
+    if five.get("status") == "SIGNAL":
+        fs = five["signal"]
+        st.success(f"5-STAR {fs['side']} SIGNAL • {fs['time']} IST • NIFTY Entry {fs['entry']:.2f} • SL {fs['stop_loss']:.2f} • T1 {fs['target1']:.2f} • T2 {fs['target2']:.2f} • 3m Volume {fs['volume_3m']:,}")
+        st.caption(f"EMA21 ₹{fs['ema21']:.2f} • VWAP ₹{fs['vwap']:.2f} • VWMA20 ₹{fs['vwma20']:.2f} • Supertrend ₹{fs['supertrend']:.2f}")
+    elif five.get("status") == "NO_SIGNAL":
+        st.info(f"5-STAR: NO SIGNAL — {five.get('reason','')}")
+    else:
+        st.warning(f"5-STAR DATA UNAVAILABLE — {five.get('reason','Check Dhan candle data.')}")
+    st.caption("Pine inputs: EMA21, VWAP, VWMA20, Supertrend(10,3), 3m volume ≥125,000, bar close, 09:31–15:00, one signal/day. Chart timeframe mapped to 5m.")
     daily_direction = result["regime"].get("regime", "NEUTRAL")
     intraday_direction = result["direction"]
     aligned = daily_direction == intraday_direction and intraday_direction in ("BULLISH", "BEARISH")
