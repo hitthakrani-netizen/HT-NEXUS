@@ -58,7 +58,7 @@ def evaluate_nifty_5star(chart_5m: pd.DataFrame, volume_1m: pd.DataFrame,
     v3 = v3[v3.index.time <= pd.Timestamp("15:00").time()]
     # Pine's request.security(..., "3", volume, gaps_off, lookahead_off):
     # carry the most recently completed 3-minute value onto the chart bars.
-    df["vol3m"] = v3.reindex(df.index, method="ffill")
+    df["vol3m"] = v3.reindex(df.index + pd.Timedelta(minutes=5), method="ffill")
     df["ema21"] = df["close"].ewm(span=21, adjust=False, min_periods=21).mean()
     typical = (df["high"] + df["low"] + df["close"]) / 3.0
     vol_chart = pd.to_numeric(df["volume"], errors="coerce").fillna(0.0)
