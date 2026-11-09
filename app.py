@@ -9,6 +9,7 @@ from strategy_engine import evaluate_symbol, market_regime, relative_strength
 from backtest import run_backtest
 from stock_options import scan_stock_option_chain
 from nse_market_data import NSEMarketData, NSEDataError
+from nifty_5star import evaluate_nifty_5star
 
 IST=ZoneInfo("Asia/Kolkata")
 st.set_page_config(page_title="HT NEXUS PRO", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
@@ -147,12 +148,17 @@ if st.button("📈 Scan STOCKS — BTST / SWING",type="primary"):
             try:
                 nifty_daily=client.daily(nifty_id,"IDX_I","INDEX",datetime.now(IST).date()-timedelta(days=daily_lookback))
                 nifty_intraday=client.intraday(nifty_id,"IDX_I","INDEX",interval,end-timedelta(days=lookback),end)
+                # Pine price rules use chart timeframe; HT NEXUS uses 5m and separately aggregates 1m volume into 3m.
+                nifty_5m=client.intraday(nifty_id,"IDX_I","INDEX","5",end-timedelta(days=10),end)
+                nifty_1m=client.intraday(nifty_id,"IDX_I","INDEX","1",end-timedelta(days=3),end)
+                nifty_5star=evaluate_nifty_5star(nifty_5m,nifty_1m)
                 nifty_regime=market_regime(nifty_daily)
                 nifty_signal=evaluate_symbol("NIFTY",nifty_intraday,nifty_daily,nifty_regime,strategy=strategy,enforce_btst_window=False)
             except Exception as nifty_error:
                 st.warning(f"NIFTY data unavailable: {nifty_error}. Stock scan will continue without index confirmation.")
             st.session_state["nifty_regime"]=nifty_regime
             st.session_state["nifty_signal"]=nifty_signal
+            st.session_state["nifty_5star"]=nifty_5star if "nifty_5star" in locals() else {"status":"DATA_UNAVAILABLE","reason":"5-STAR candle fetch failed."}
             st.session_state["nifty_daily"]=nifty_daily
             for i,item in enumerate(universe):
                 try:
@@ -183,6 +189,19 @@ if "stock_signals" in st.session_state:
         st.success(f"NIFTY {ns['side']} setup • Score {ns['score']}/100 • Entry {ns['entry']:.2f} • SL {ns['stop_loss']:.2f} • Target {ns['target']:.2f}")
     else:
         st.info("NIFTY પર હાલ બધા confirmation મળ્યા નથી — index પર NO TRADE.")
+    st.markdown("### ⭐ NIFTY 5-STAR Indicator (તમારી આપેલી Pine Script)")
+    five = st.session_state.get("nifty_5star", {"status":"DATA_UNAVAILABLE","reason":"Run NIFTY scan to calculate."})
+    if five.get("status") == "SIGNAL":
+        fs = five["signal"]
+        st.success(f"5-STAR {fs['side']} SIGNAL • {fs['time']} IST • NIFTY Entry {fs['entry']:.2f} • SL {fs['stop_loss']:.2f} • T1 {fs['target1']:.2f} • T2 {fs['target2']:.2f} • 3m Volume {fs['volume_3m']:,}")
+        st.caption(f"EMA21 ₹{fs['ema21']:.2f} • VWAP ₹{fs['vwap']:.2f} • VWMA20 ₹{fs['vwma20']:.2f} • Supertrend ₹{fs['supertrend']:.2f} • {fs['signal_timeframe']}")
+    elif five.get("status") == "NO_SIGNAL":
+        st.info(f"5-STAR: NO SIGNAL — {five.get('reason','')}")
+        if five.get("last_close") is not None:
+            st.caption(f"Last NIFTY close ₹{five['last_close']:.2f} • latest completed 3m volume {five.get('last_3m_volume',0):,}")
+    else:
+        st.warning(f"5-STAR DATA UNAVAILABLE — {five.get('reason','Check Dhan candle data.')}")
+    st.caption("Rules from your Pine file: EMA21 + VWAP + VWMA20 + Supertrend(10,3) + 3m volume ≥125,000; confirmed bar; 09:31–15:00; first signal/day.")
     signals=st.session_state["stock_signals"]
     st.subheader("Strongest NSE Stock BTST / SWING Signal")
     if signals:
@@ -488,11 +507,15 @@ if "nifty_option_scan" in st.session_state:
         if result["puts"]: st.dataframe(pd.DataFrame(result["puts"]),use_container_width=True,hide_index=True)
         else: st.info("No PUT contract passed liquidity filters.")
     # Only allow a NIFTY option preference when Daily and Intraday directions match.
-    preferred = ("CALL" if result["direction"] == "BULLISH" else "PUT") if aligned else None
+    five = st.session_state.get("nifty_5star", {})
+    five_signal = five.get("signal") if five.get("status") == "SIGNAL" else None
+    preferred = five_signal["side"] if five_signal else (("CALL" if result["direction"] == "BULLISH" else "PUT") if aligned else None)
     best_list = result["calls"] if preferred=="CALL" else result["puts"] if preferred=="PUT" else []
     if best_list:
         best = best_list[0]
-        st.success(f"BTST preference: {preferred} {best['Strike']} • BUY near ₹{best['Buy Price (Ask)']:.2f} • SL ₹{best['Stop Loss']:.2f} • T1 ₹{best['Target 1']:.2f} • T2 ₹{best['Target 2']:.2f} • Liquidity score {best['Score']}/100")
+        st.success(f"{'5-STAR MATCH' if five_signal else 'BTST preference'}: {preferred} {best['Strike']} • BUY near ₹{best['Buy Price (Ask)']:.2f} • SL ₹{best['Stop Loss']:.2f} • T1 ₹{best['Target 1']:.2f} • T2 ₹{best['Target 2']:.2f} • Liquidity score {best['Score']}/100")
+        if five_signal:
+            st.caption(f"Strike selected from Dhan live chain to match 5-STAR {five_signal['side']}; NIFTY underlying entry ₹{five_signal['entry']:.2f}, not option premium.")
         st.caption("Risk model: 15% premium stop; Target 1 = 1R (+15%), Target 2 = 2R (+30%). Ask is indicative, not guaranteed fill. These are formula-based planning levels, not tested predictions; confirm live spread and risk before entry.")
     else:
         st.warning("NO TRADE — intraday trend સ્પષ્ટ નથી અથવા કોઈ contract liquidity checks પાસ કરતો નથી.")
