@@ -8,7 +8,7 @@ from indicators import add_indicators, resample_ohlcv
 
 IST = ZoneInfo("Asia/Kolkata")
 BTST_START, BTST_END = time(15, 15), time(15, 29)
-MIN_QUALITY_SCORE = 80.0
+MIN_QUALITY_SCORE = 70.0
 
 
 def market_regime(nifty_daily: pd.DataFrame) -> dict:
@@ -71,7 +71,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
     now = datetime.now(IST)
     if strategy == "BTST" and enforce_btst_window and not (BTST_START <= now.time().replace(tzinfo=None) <= BTST_END):
         return None
-    if intraday is None or daily is None or len(intraday) < 220 or len(daily) < 205:
+    if intraday is None or daily is None or len(intraday) < 100 or len(daily) < 205:
         return None
     d = add_indicators(daily)
     day = d.iloc[-1]
@@ -135,7 +135,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
                 if weakness_location < .50 or vwap_extension_pct > 4.0:
                     continue
         score = min(100.0, score)
-        if score < MIN_QUALITY_SCORE or confirmations < 3:
+        if score < MIN_QUALITY_SCORE or confirmations < 2:
             continue
         if sector_relative_strength is not None:
             aligned = sector_relative_strength > 0 if side == "LONG" else sector_relative_strength < 0
