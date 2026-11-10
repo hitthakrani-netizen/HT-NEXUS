@@ -153,7 +153,7 @@ if st.button("📈 Scan STOCKS — BTST / SWING",type="primary"):
     try:
         client=_dhan_client()
         signals=[]; diagnostics=[]; progress=st.progress(0)
-        with st.spinner("Fetching NIFTY trend and scanning NSE stocks..."):
+        with st.spinner("Scanning NSE stocks independently; NIFTY is context only..."):
             end=datetime.now(IST).replace(tzinfo=None)
             nifty_daily=pd.DataFrame()
             nifty_regime={"regime":"NEUTRAL","reason":"NIFTY data not available; stock signals will not receive index confirmation."}
@@ -173,7 +173,7 @@ if st.button("📈 Scan STOCKS — BTST / SWING",type="primary"):
                     end=datetime.now(IST).replace(tzinfo=None)
                     intra=client.intraday(item["security_id"],"NSE_EQ","EQUITY",interval,end-timedelta(days=lookback),end)
                     daily=client.daily(item["security_id"],"NSE_EQ","EQUITY",datetime.now(IST).date()-timedelta(days=daily_lookback))
-                    diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Data OK" if len(intra)>=220 and len(daily)>=205 else "Insufficient history"})
+                    diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Data OK" if len(intra)>=100 and len(daily)>=205 else "Insufficient history"})
                     srs=relative_strength(daily,nifty_daily) if not nifty_daily.empty else None
                     sig=evaluate_symbol(item["symbol"],intra,daily,nifty_regime,strategy=strategy,sector_relative_strength=srs,enforce_btst_window=False)
                     if sig and tv_screener is not None:
@@ -235,7 +235,7 @@ if "stock_signals" in st.session_state:
             st.warning(f"Best WATCHLIST candidate only: {best['symbol']} | Score {best['score']}/100 — not a confirmed trade.")
         st.caption(f"Selected as the strongest among {len(signals)} qualifying stock signals.")
         st.divider()
-        st.caption("Stock and NIFTY BTST / SWING signals only. No option contract selection or order placement.")
+        st.caption("Stock BTST / SWING screening. Dhan option-chain validation is a separate read-only step; no order placement.")
     else:
         diagnostics = st.session_state.get("stock_diagnostics", [])
         all_data_failed = bool(diagnostics) and all(
