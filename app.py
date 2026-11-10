@@ -10,6 +10,7 @@ from backtest import run_backtest
 from stock_options import scan_stock_option_chain
 from nse_market_data import NSEMarketData, NSEDataError
 from nifty_5star import evaluate_nifty_5star
+from tradingview_screener import parse_tradingview_csv, confirm_with_tradingview
 
 IST=ZoneInfo("Asia/Kolkata")
 st.set_page_config(page_title="HT NEXUS PRO", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
@@ -136,6 +137,18 @@ if st.button("🔌 Test Dhan API Connection"):
     except Exception as e:
         st.error(f"Dhan connection test failed: {e}")
 
+st.markdown("### TradingView Stock Screener Confirmation")
+st.caption("TradingViewમાં Stock Screenerનું CSV Export અહીં upload કરો. Official live screener API/scraping પર આધાર નથી; CSV data માત્ર extra confirmation છે.")
+tv_file = st.file_uploader("TradingView Screener CSV (optional)", type=["csv"], key="tv_stock_screener_csv")
+tv_screener = None
+if tv_file is not None:
+    try:
+        tv_screener = parse_tradingview_csv(tv_file.getvalue())
+        st.success(f"TradingView CSV loaded: {len(tv_screener)} symbols. Uploaded screener must agree with the stock signal.")
+    except Exception as tv_error:
+        st.error(f"TradingView CSV error: {tv_error}")
+        tv_screener = {}
+
 if st.button("📈 Scan STOCKS — BTST / SWING",type="primary"):
     try:
         client=_dhan_client()
@@ -163,8 +176,21 @@ if st.button("📈 Scan STOCKS — BTST / SWING",type="primary"):
                     diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Data OK" if len(intra)>=220 and len(daily)>=205 else "Insufficient history"})
                     srs=relative_strength(daily,nifty_daily) if not nifty_daily.empty else None
                     sig=evaluate_symbol(item["symbol"],intra,daily,nifty_regime,strategy=strategy,sector_relative_strength=srs,enforce_btst_window=False)
+                    if sig and tv_screener is not None:
+                        tv_check = confirm_with_tradingview(sig, tv_screener)
+                        sig["tradingview_confirmation"] = tv_check
+                        # When a screener file is supplied, require a matching symbol
+                        # and at least two aligned screener checks; otherwise reject.
+                        if not tv_check.get("matched") or not tv_check.get("aligned"):
+                            diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Rejected: TradingView confirmation — "+tv_check.get("reason","No confirmation")})
+                            sig = None
+                        else:
+                            sig["score"] = min(100.0, float(sig.get("score", 0)) + 5.0)
+                            sig["reasons"] += "; TradingView: "+tv_check.get("reason","")
                     if sig:
                         sig["sector"]=item["sector"]
+                        if tv_screener is None:
+                            sig["tradingview_confirmation"] = {"matched": False, "aligned": False, "score": 0, "reason": "CSV not supplied; Dhan technical checks only."}
                         signals.append(sig)
                 except Exception as e:
                     diagnostics.append({"Stock":item["symbol"],"Intraday candles":0,"Daily candles":0,"Status":str(e)[:500]})
@@ -192,6 +218,14 @@ if "stock_signals" in st.session_state:
         df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target 1":round(best.get("target1",best["target"]),2),"Target 2":round(best.get("target2",best["target"]),2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
         st.dataframe(df,use_container_width=True,hide_index=True)
         st.write(best["reasons"])
+        tvc = best.get("tradingview_confirmation", {})
+        if tvc.get("matched") and tvc.get("aligned"):
+            st.success(f"TradingView confirmation: PASS • {tvc.get('score',0)}/100")
+            st.caption(tvc.get("reason",""))
+        elif tv_screener is not None:
+            st.error("TradingView confirmation was not passed. This candidate should not be treated as a trade.")
+        else:
+            st.info("TradingView CSV was not uploaded; this signal uses Dhan candle-based confirmation only.")
         if best.get("strategy") == "BTST" and best.get("btst_quality"):
             st.markdown("**BTST Closing Quality**")
             st.json(best["btst_quality"])

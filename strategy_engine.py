@@ -8,7 +8,7 @@ from indicators import add_indicators, resample_ohlcv
 
 IST = ZoneInfo("Asia/Kolkata")
 BTST_START, BTST_END = time(15, 15), time(15, 29)
-MIN_QUALITY_SCORE = 60.0
+MIN_QUALITY_SCORE = 80.0
 
 
 def market_regime(nifty_daily: pd.DataFrame) -> dict:
@@ -71,18 +71,18 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
     now = datetime.now(IST)
     if strategy == "BTST" and enforce_btst_window and not (BTST_START <= now.time().replace(tzinfo=None) <= BTST_END):
         return None
-    if intraday is None or daily is None or len(intraday) < 220 or len(daily) < 60:
+    if intraday is None or daily is None or len(intraday) < 220 or len(daily) < 205:
         return None
     d = add_indicators(daily)
     day = d.iloc[-1]
     candidates = []
     for side in ("LONG", "SHORT"):
-        daily_trend = bool(day.close > day.ema20 > day.ema50) if side == "LONG" else bool(day.close < day.ema20 < day.ema50)
+        daily_trend = bool(day.close > day.ema20 > day.ema50 > day.ema200) if side == "LONG" else bool(day.close < day.ema20 < day.ema50 < day.ema200)
         if not daily_trend:
             continue
         # NIFTY regime is context only, never a mandatory stock-signal filter.
         # This keeps stock BTST/SWING signals independent of index direction.
-        if (side == "LONG" and day.rsi14 < 45) or (side == "SHORT" and day.rsi14 > 55):
+        if (side == "LONG" and not 50 <= day.rsi14 <= 75) or (side == "SHORT" and not 25 <= day.rsi14 <= 50):
             continue
         checks = _intraday_checks(intraday, side)
         if not checks or not checks["trend"]:
@@ -135,7 +135,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
                 if weakness_location < .50 or vwap_extension_pct > 4.0:
                     continue
         score = min(100.0, score)
-        if score < 55 or confirmations < 2:
+        if score < MIN_QUALITY_SCORE or confirmations < 3:
             continue
         if sector_relative_strength is not None:
             aligned = sector_relative_strength > 0 if side == "LONG" else sector_relative_strength < 0
@@ -156,7 +156,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
             "stop_loss": stop, "target": target, "target1": entry+(risk if side=="LONG" else -risk),
             "target2": entry+(1.5*risk if side=="LONG" else -1.5*risk),
             "target3": target, "risk_reward": reward/risk, "score": round(score,1),
-            "score_label": "STRONG" if score >= 80 else "QUALIFIED" if score >= MIN_QUALITY_SCORE and confirmations >= 2 else "WATCHLIST",
+            "score_label": "STRONG" if score >= 85 else "QUALIFIED",
             "reasons": reasons, "atr": atr_value, "checks": checks, "btst_quality": btst_quality,
             "sector_relative_strength": sector_relative_strength,
             "signal_time": str(intraday.index[-1]),
