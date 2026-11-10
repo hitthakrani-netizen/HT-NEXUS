@@ -147,7 +147,7 @@ if tv_file is not None:
         st.success(f"TradingView CSV loaded: {len(tv_screener)} symbols. Uploaded screener must agree with the stock signal.")
     except Exception as tv_error:
         st.error(f"TradingView CSV error: {tv_error}")
-        tv_screener = None
+        tv_screener = {}
 
 if st.button("📈 Scan STOCKS — BTST / SWING",type="primary"):
     try:
