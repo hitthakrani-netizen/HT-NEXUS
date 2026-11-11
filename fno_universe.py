@@ -126,8 +126,11 @@ def load_nse_stock_fno_universe(timeout: int = 30) -> list[dict]:
     for _, option in opt.iterrows():
         underlying_id = option["_underlying_id"]
         underlying_symbol = option["_underlying_symbol"]
+        # Prefer Dhan's underlying ID. If it does not resolve to an NSE_EQ
+        # row (some master snapshots use a different cash/derivative ID field),
+        # fall back to the exact normalized underlying symbol.
         cash_row = cash_by_id.get(underlying_id) if underlying_id else None
-        if cash_row is None and not underlying_id and underlying_symbol:
+        if cash_row is None and underlying_symbol:
             cash_row = cash_by_symbol.get(underlying_symbol)
         if cash_row is None:
             if underlying_id or underlying_symbol:
