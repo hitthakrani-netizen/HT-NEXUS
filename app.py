@@ -11,6 +11,7 @@ from stock_options import scan_stock_option_chain
 from nse_market_data import NSEMarketData, NSEDataError
 from nifty_5star import evaluate_nifty_5star
 from tradingview_screener import parse_tradingview_csv, confirm_with_tradingview
+from fno_universe import load_nse_stock_fno_universe, UniverseError
 
 IST=ZoneInfo("Asia/Kolkata")
 st.set_page_config(page_title="HT NEXUS PRO", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
@@ -84,9 +85,8 @@ with st.sidebar:
     capital=st.number_input("Backtest capital (₹)",min_value=10000,value=100000,step=10000)
     risk=st.slider("Risk per trade (%)",0.25,2.0,1.0,step=0.25)/100
     nifty_id=st.text_input("Dhan NIFTY 50 Index Security ID",value="13",help="Dhan instrument master મુજબ IDX_I / INDEX ID ચકાસો.")
-    st.markdown("**NSE stock universe — SYMBOL,SECURITY_ID,SECTOR**")
-    universe_text=st.text_area("NSE stocks",value="RELIANCE,2885,ENERGY\nTCS,11536,IT\nINFY,1594,IT\nHDFCBANK,1333,BANK\nICICIBANK,4963,BANK\nSBIN,3045,BANK\nLT,11483,INDUSTRIALS\nITC,1660,FMCG\nAXISBANK,5900,BANK\nBHARTIARTL,10604,TELECOM",height=220)
-    st.caption("Verify each Security ID with Dhan's current NSE_EQ instrument master.")
+    st.markdown("**NSE Stock F&O Universe**")
+    st.caption("Dhanના current instrument master માંથી બધા NSE OPTSTK underlyings આપમેળે load થશે. Manual 10-stock limit નથી.")
 
 
 def _dhan_client():
@@ -117,10 +117,22 @@ def _dhan_client():
     return DhanDataClient(cid, token)
 
 
-universe=parse_universe(universe_text)
+@st.cache_data(ttl=21600, show_spinner=False)
+def _cached_fno_universe():
+    return load_nse_stock_fno_universe()
+
+try:
+    with st.spinner("Dhan masterમાંથી બધા NSE Stock F&O શેર load થઈ રહ્યા છે..."):
+        universe = _cached_fno_universe()
+    universe_error = None
+except Exception as universe_exc:
+    universe = []
+    universe_error = str(universe_exc)
+    st.error(f"F&O universe unavailable: {universe_error}. જૂની 10-stock listથી scan ચલાવવામાં આવશે નહીં.")
+
 c1,c2,c3=st.columns(3)
 c1.metric("Strategy",strategy)
-c2.metric("NSE stocks",len(universe))
+c2.metric("NSE Stock F&O",len(universe))
 c3.metric("IST",datetime.now(IST).strftime("%d %b %Y, %H:%M:%S"))
 
 if strategy=="BTST" and not (datetime.strptime("15:15","%H:%M").time()<=datetime.now(IST).time().replace(tzinfo=None)<=datetime.strptime("15:29","%H:%M").time()):
@@ -149,7 +161,7 @@ if tv_file is not None:
         st.error(f"TradingView CSV error: {tv_error}")
         tv_screener = {}
 
-if st.button("📈 Scan STOCKS — BTST / SWING",type="primary"):
+if st.button("📈 Scan ALL STOCK F&O — BTST / SWING",type="primary", disabled=not universe):
     try:
         client=_dhan_client()
         signals=[]; diagnostics=[]; progress=st.progress(0)
@@ -197,6 +209,21 @@ if st.button("📈 Scan STOCKS — BTST / SWING",type="primary"):
                 progress.progress((i+1)/max(len(universe),1))
         st.session_state["stock_signals"]=signals
         st.session_state["stock_diagnostics"]=diagnostics
+        # Only after scanning every eligible stock, validate the strongest candidate's option chain.
+        st.session_state.pop("stock_option_result", None)
+        st.session_state.pop("stock_option_error", None)
+        if signals:
+            strongest = max(signals, key=lambda x:(float(x.get("score",0)),float(x.get("risk_reward",0))))
+            underlying = next((x for x in universe if x["symbol"] == strongest["symbol"]), None)
+            if underlying:
+                try:
+                    st.session_state["stock_option_result"] = scan_stock_option_chain(
+                        client, strongest["symbol"], underlying.get("fno_security_id", underlying["security_id"]), strongest["side"]
+                    )
+                except Exception as option_exc:
+                    st.session_state["stock_option_error"] = str(option_exc)
+        else:
+            st.session_state["stock_option_result"] = None
     except Exception as e:
         st.error(f"Data/API error: {e}")
 
@@ -233,9 +260,18 @@ if "stock_signals" in st.session_state:
             st.success(f"Qualified setup: {best['symbol']} | Entry ₹{best['entry']:.2f} | SL ₹{best['stop_loss']:.2f} | Target ₹{best['target']:.2f} | R:R 1:{best['risk_reward']:.2f}")
         else:
             st.warning(f"Best WATCHLIST candidate only: {best['symbol']} | Score {best['score']}/100 — not a confirmed trade.")
-        st.caption(f"Selected as the strongest among {len(signals)} qualifying stock signals.")
+        st.caption(f"Scanned {len(universe)} NSE Stock F&O underlyings; {len(signals)} passed stock confirmations.")
+        option_result = st.session_state.get("stock_option_result")
+        if option_result and option_result.get("best"):
+            contract = option_result["best"]
+            st.success(f"FINAL OPTION-CHECKED CANDIDATE: {best['symbol']} {contract['Type']} {contract['Strike']} • Expiry {contract['Expiry']} • LTP ₹{contract['LTP']:.2f} • Indicative buy ₹{contract['BUY (Ask)']:.2f} • Spread {contract['Spread %']:.2f}% • OI {contract['OI']:,} • Volume {contract['Volume']:,}")
+            st.caption(f"Premium SL ₹{contract['SL']:.2f} • T1 ₹{contract['Target 1']:.2f} • T2 ₹{contract['Target 2']:.2f} • Delta {contract['Delta']:.3f} • Read-only; no order is placed.")
+        elif st.session_state.get("stock_option_error"):
+            st.warning("STOCK SETUP FOUND, BUT OPTION VALIDATION FAILED — NO FINAL OPTION TRADE. " + st.session_state["stock_option_error"])
+        else:
+            st.warning("STOCK SETUP FOUND, BUT NO LIQUID OPTION CONTRACT PASSED — NO FINAL TRADE.")
         st.divider()
-        st.caption("Stock BTST / SWING screening. Dhan option-chain validation is a separate read-only step; no order placement.")
+        st.caption("Only BTST and Swing stock strategies are scanned. NIFTY is not a required stock filter. No auto orders.")
     else:
         diagnostics = st.session_state.get("stock_diagnostics", [])
         all_data_failed = bool(diagnostics) and all(
