@@ -185,7 +185,7 @@ if st.button("📈 Scan ALL STOCK F&O — BTST / SWING",type="primary", disabled
                     end=datetime.now(IST).replace(tzinfo=None)
                     intra=client.intraday(item["security_id"],"NSE_EQ","EQUITY",interval,end-timedelta(days=lookback),end)
                     daily=client.daily(item["security_id"],"NSE_EQ","EQUITY",datetime.now(IST).date()-timedelta(days=daily_lookback))
-                    diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Data OK" if len(intra)>=100 and len(daily)>=205 else "Insufficient history"})
+                    diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Data OK" if len(intra)>=220 and len(daily)>=205 else f"Insufficient history: need 220 intraday / 205 daily; got {len(intra)} / {len(daily)}"})
                     srs=relative_strength(daily,nifty_daily) if not nifty_daily.empty else None
                     sig=evaluate_symbol(item["symbol"],intra,daily,nifty_regime,strategy=strategy,sector_relative_strength=srs,enforce_btst_window=False)
                     if sig and tv_screener is not None:
@@ -280,8 +280,11 @@ if "stock_signals" in st.session_state:
             and str(d.get("Status", "")).startswith(("Dhan rejected", "Network error", "Dhan HTTP", "Dhan API"))
             for d in diagnostics
         )
+        all_insufficient = bool(diagnostics) and all(str(d.get("Status", "")).startswith("Insufficient history") for d in diagnostics)
         if all_data_failed:
             st.error("DATA ERROR — Dhan rejected the market-data requests for every stock. No strategy confirmation was possible. This is NOT a genuine NO TRADE result. Check the full per-stock error below before relying on this scan.")
+        elif all_insufficient:
+            st.warning("INSUFFICIENT DATA — one or more required candle histories are missing for every scanned stock. This is NOT a genuine NO TRADE result. Check the candle counts below.")
         else:
             st.warning("No stock passed the confirmation rules in this scan. This is a genuine NO TRADE result, not an index signal.")
     if st.session_state.get("stock_diagnostics"):
