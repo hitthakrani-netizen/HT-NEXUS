@@ -79,8 +79,16 @@ def evaluate_nifty_5star(chart_5m: pd.DataFrame, volume_1m: pd.DataFrame,
     df["vwap"] = _vwap(df)
     df["vwma20"] = (df["close"] * vol_chart).rolling(20, min_periods=20).sum() / vol_chart.rolling(20, min_periods=20).sum().replace(0,np.nan)
     df["supertrend"], df["st_up"] = _supertrend_source(df["high"],df["low"],df["close"],10,3.0)
-    df["buy"] = (df["close"]>df["ema21"]) & (df["close"]>df["vwap"]) & (df["close"]>df["vwma20"]) & (df["close"]>df["supertrend"]) & (df["vol3m"]>=min_3m_volume)
-    df["sell"] = (df["close"]<df["ema21"]) & (df["close"]<df["vwap"]) & (df["close"]<df["vwma20"]) & (df["close"]<df["supertrend"]) & (df["vol3m"]>=min_3m_volume)
+    candle_range = (df["high"] - df["low"]).replace(0, np.nan)
+    df["body_pct"] = (df["close"] - df["open"]).abs() / candle_range
+    df["close_location"] = (df["close"] - df["low"]) / candle_range
+    prior_avg_volume = vol_chart.shift(1).rolling(20, min_periods=20).mean()
+    df["relative_volume"] = vol_chart / prior_avg_volume.replace(0, np.nan)
+    strong_buy_candle = (df["body_pct"] >= 0.60) & (df["close_location"] >= 0.80)
+    strong_sell_candle = (df["body_pct"] >= 0.60) & (df["close_location"] <= 0.20)
+    volume_confirmed = (df["relative_volume"] >= 1.50) & (df["vol3m"] >= min_3m_volume)
+    df["buy"] = (df["close"]>df["ema21"]) & (df["close"]>df["vwap"]) & (df["close"]>df["vwma20"]) & (df["close"]>df["supertrend"]) & volume_confirmed & strong_buy_candle
+    df["sell"] = (df["close"]<df["ema21"]) & (df["close"]<df["vwap"]) & (df["close"]<df["vwma20"]) & (df["close"]<df["supertrend"]) & volume_confirmed & strong_sell_candle
     # Keep only fully closed candles and the script's 09:31-15:00 time window.
     now = pd.Timestamp.now(tz="Asia/Kolkata")
     df = df[(df.index.time >= pd.Timestamp("09:31").time()) & (df.index.time <= pd.Timestamp("15:00").time())]
@@ -103,7 +111,7 @@ def evaluate_nifty_5star(chart_5m: pd.DataFrame, volume_1m: pd.DataFrame,
                 candidates.append({"date":str(day),"time":ts.strftime("%H:%M:%S"),"side":side,
                     "entry":round(entry,2),"stop_loss":round(stop,2),"target1":round(target,2),
                     "target2":round(entry+(2*risk if side=="CALL" else -2*risk),2),
-                    "volume_3m":int(row["vol3m"]),"ema21":round(float(row["ema21"]),2),
+                    "volume_3m":int(row["vol3m"]),"relative_volume":round(float(row["relative_volume"]),2),"candle_body_pct":round(float(row["body_pct"]),2),"ema21":round(float(row["ema21"]),2),
                     "vwap":round(float(row["vwap"]),2),"vwma20":round(float(row["vwma20"]),2),
                     "supertrend":round(stop,2),"signal_timeframe":"5m chart + 3m volume"})
     today = now.date()
@@ -112,4 +120,4 @@ def evaluate_nifty_5star(chart_5m: pd.DataFrame, volume_1m: pd.DataFrame,
         last=df.iloc[-1]
         return {"status":"NO_SIGNAL","reason":"No 5-STAR BUY/SELL condition confirmed today. This is not a Dhan/NSE data error.",
                 "last_close":round(float(last["close"]),2),"last_3m_volume":int(last["vol3m"]) if pd.notna(last["vol3m"]) else 0}
-    return {"status":"SIGNAL","signal":today_hits[0],"reason":"First confirmed signal of the day, matching the supplied Pine one-signal-per-day rule."}
+    return {"status":"SIGNAL","signal":today_hits[0],"reason":"First confirmed signal of the day: strong candle body/close + 1.5x relative volume + supplied Pine filters."}
