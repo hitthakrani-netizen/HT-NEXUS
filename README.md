@@ -75,7 +75,7 @@ Long/short candidates require:
 - Resampled 15-minute confirmation.
 - False-breakout guard: close beyond prior range and limited wick retracement.
 - ATR-based stop at 1.5 ATR and target at 2.5 ATR (nominal 1:1.67 before costs).
-- Market regime must not oppose the trade; BTST requires aligned regime.
+- NIFTY regime is context only and is not a mandatory stock-signal filter. BTST uses stock-level closing quality, not NIFTY direction.
 - Only the highest-scoring eligible candidate is displayed; otherwise NO TRADE.
 
 These are transparent starting parameters, not an assertion of accuracy. Backtest and tune only on training data; preserve a later untouched out-of-sample period.
@@ -115,7 +115,7 @@ This software is for research/education only, not investment advice. No return, 
 
 The scanner does not require Render or a paid TradingView webhook plan. It uses DhanHQ market data directly from the Streamlit Community Cloud app. TradingView Free alerts are not automatically delivered to this app; no unsupported scraping, account-password sharing, or unofficial TradingView API is used.
 
-The app scans NIFTY 50 and the configured NSE cash-stock universe when the user presses **Scan NSE Stocks**. NIFTY daily regime filters stock direction, and relative strength versus NIFTY contributes to ranking. NIFTY data errors are shown separately and the stock scan continues with neutral index context. BTST is time-gated to 3:15–3:29 PM IST; SWING can be scanned outside that window. The app is read-only and does not place orders.
+The app scans the full configured NSE stock F&O universe when the user presses **Scan ALL STOCK F&O — BTST / SWING**. NIFTY daily regime and relative strength are context/ranking information only; NIFTY is not a required filter. NIFTY data errors are shown separately and the stock scan continues without index confirmation. BTST is time-gated to 3:15–3:29 PM IST; SWING can be scanned outside that window. The app is read-only and does not place orders.
 
 NIFTY 50 default Dhan ID 13 in segment IDX_I is supported by Dhan instrument references; verify the ID if Dhan returns a data error. Setup scores are technical confluence scores, not probabilities or guarantees. Backtest and paper-test before considering any live trade.
 
