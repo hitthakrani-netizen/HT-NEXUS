@@ -51,14 +51,20 @@ def _intraday_checks(intraday: pd.DataFrame, side: str):
         trend = bool(last.close < last.ema20 and last.ema20 < last.ema50)
         momentum = bool(last.rsi14 <= 50 and last.macd < last.macd_signal)
         vwap_ok = bool(last.close < last.vwap)
-    volume = bool(last.volume_ratio >= 1.15)
+    volume = bool(last.volume_ratio >= 1.50)
+    body_pct = abs(float(last.close) - float(last.open)) / rng
+    close_location = (float(last.close) - float(last.low)) / rng
+    strong_candle = bool(body_pct >= 0.60 and (close_location >= 0.80 if side == "LONG" else close_location <= 0.20))
     fifteen = add_indicators(resample_ohlcv(intraday, "15min"))
     mtf = False
     if len(fifteen) >= 55:
         m = fifteen.iloc[-1]
-        mtf = bool(m.close > m.ema20 if side == "LONG" else m.close < m.ema20)
+        mtf_trend = bool(m.close > m.ema20 if side == "LONG" else m.close < m.ema20)
+        mtf_volume = bool(pd.notna(m.volume_ratio) and m.volume_ratio >= 1.20)
+        mtf = mtf_trend and mtf_volume
     return {"last": last, "trend": trend, "momentum": momentum, "vwap": vwap_ok,
-            "volume": volume, "breakout": breakout, "mtf": mtf, "fifteen": fifteen}
+            "volume": volume, "strong_candle": strong_candle, "body_pct": body_pct,
+            "close_location": close_location, "breakout": breakout, "mtf": mtf, "fifteen": fifteen}
 
 
 def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_relative_strength=None, enforce_btst_window=False):
@@ -91,16 +97,20 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
         # Fixed, transparent weights; missing/weak confirmations lower score rather than
         # silently disqualifying every otherwise valid trend setup.
         points = {
-            "Daily trend": 25.0,
-            "Intraday EMA trend": 15.0,
-            "RSI + MACD": 15.0 if checks["momentum"] else 0.0,
+            "Daily trend": 20.0,
+            "Intraday EMA trend": 10.0,
+            "RSI + MACD": 10.0 if checks["momentum"] else 0.0,
             "VWAP": 10.0 if checks["vwap"] else 0.0,
-            "Relative volume": 15.0 if checks["volume"] else 0.0,
-            "Breakout / breakdown": 10.0 if checks["breakout"] else 0.0,
-            "15m confirmation": 10.0 if checks["mtf"] else 0.0,
+            "Relative volume >= 1.5x": 20.0 if checks["volume"] else 0.0,
+            "Strong candle body/close": 10.0 if checks["strong_candle"] else 0.0,
+            "Breakout / breakdown": 15.0 if checks["breakout"] else 0.0,
+            "15m trend + volume": 5.0 if checks["mtf"] else 0.0,
         }
         score = sum(points.values())
-        confirmations = sum(bool(checks[k]) for k in ("momentum", "vwap", "volume", "breakout", "mtf"))
+        required_checks = ("momentum", "vwap", "volume", "strong_candle", "breakout", "mtf")
+        confirmations = sum(bool(checks[k]) for k in required_checks)
+        if not all(bool(checks[k]) for k in required_checks):
+            continue
         btst_quality = {}
         if strategy == "BTST":
             # End-of-day strength using only candles available at scan time.
@@ -135,7 +145,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
                 if weakness_location < .50 or vwap_extension_pct > 4.0:
                     continue
         score = min(100.0, score)
-        if score < MIN_QUALITY_SCORE or confirmations < 2:
+        if score < 85.0 or confirmations < len(required_checks):
             continue
         if sector_relative_strength is not None:
             aligned = sector_relative_strength > 0 if side == "LONG" else sector_relative_strength < 0
@@ -157,7 +167,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
             "target2": entry+(1.5*risk if side=="LONG" else -1.5*risk),
             "target3": target, "risk_reward": reward/risk, "score": round(score,1),
             "score_label": "STRONG" if score >= 85 else "QUALIFIED",
-            "reasons": reasons, "atr": atr_value, "checks": checks, "btst_quality": btst_quality,
+            "reasons": reasons + f"; Candle body: {checks['body_pct']:.0%}; close location: {checks['close_location']:.0%}; relative volume: {float(last.volume_ratio):.2f}x", "atr": atr_value, "checks": checks, "btst_quality": btst_quality,
             "sector_relative_strength": sector_relative_strength,
             "signal_time": str(intraday.index[-1]),
         })

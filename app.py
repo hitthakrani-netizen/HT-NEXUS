@@ -436,14 +436,26 @@ if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_optio
             from indicators import add_indicators
             ix = add_indicators(ni)
             direction = "NEUTRAL"
+            nifty_candle_check = "Insufficient completed candles."
             if len(ix) >= 60:
                 z = ix.iloc[-1]
-                if z.close > z.ema20 > z.ema50 and z.rsi14 >= 50 and z.macd > z.macd_signal:
+                candle_range = max(float(z.high - z.low), 1e-9)
+                body_pct = abs(float(z.close - z.open)) / candle_range
+                close_location = (float(z.close - z.low)) / candle_range
+                volume_ok = bool(pd.notna(z.volume_ratio) and float(z.volume_ratio) >= 1.50)
+                strong_bull = body_pct >= 0.60 and close_location >= 0.80
+                strong_bear = body_pct >= 0.60 and close_location <= 0.20
+                if z.close > z.ema20 > z.ema50 and z.rsi14 >= 50 and z.macd > z.macd_signal and z.close > z.vwap and strong_bull and volume_ok:
                     direction = "BULLISH"
-                elif z.close < z.ema20 < z.ema50 and z.rsi14 <= 50 and z.macd < z.macd_signal:
+                    nifty_candle_check = f"Strong bullish candle; body {body_pct:.0%}; close near high; relative volume {float(z.volume_ratio):.2f}x."
+                elif z.close < z.ema20 < z.ema50 and z.rsi14 <= 50 and z.macd < z.macd_signal and z.close < z.vwap and strong_bear and volume_ok:
                     direction = "BEARISH"
+                    nifty_candle_check = f"Strong bearish candle; body {body_pct:.0%}; close near low; relative volume {float(z.volume_ratio):.2f}x."
+                else:
+                    nifty_candle_check = f"No strong directional confirmation: body {body_pct:.0%}, relative volume {float(z.volume_ratio):.2f}x; require body >=60%, close in outer 20%, volume >=1.5x."
             daily_direction = regime.get("regime", "NEUTRAL")
             intraday_direction = direction
+            st.session_state["nifty_candle_check"] = nifty_candle_check
             # Show the intraday direction without a hard high-confidence gate.
             # Daily/intraday agreement is displayed separately for the user to judge.
             direction = intraday_direction
