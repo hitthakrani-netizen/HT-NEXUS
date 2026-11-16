@@ -140,8 +140,8 @@ c1.metric("Strategy",strategy)
 c2.metric("NSE Stock F&O",len(universe))
 c3.metric("IST",datetime.now(IST).strftime("%d %b %Y, %H:%M:%S"))
 
-if strategy=="BTST" and not (datetime.strptime("15:15","%H:%M").time()<=datetime.now(IST).time().replace(tzinfo=None)<=datetime.strptime("15:29","%H:%M").time()):
-    st.info("BTST ONE-CLICK window: 3:15 PM–3:29 PM IST. One scan internally checks the 3:00–3:14 shortlist and fresh 3:15+ confirmation, then fetches the matching stock CALL/PUT automatically.")
+if strategy=="BTST" and not (datetime.strptime("15:16","%H:%M").time()<=datetime.now(IST).time().replace(tzinfo=None)<=datetime.strptime("15:29","%H:%M").time()):
+    st.info("BTST ONE-CLICK window: 3:16 PM–3:29 PM IST. Press after the 3:15 one-minute candle closes; the scanner checks the 3:00–3:14 shortlist plus the completed 3:15+ confirmation, then fetches the matching CALL/PUT automatically.")
 
 if st.button("🔌 Test Dhan API Connection"):
     try:
@@ -190,6 +190,11 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                         item["security_id"], "NSE_EQ", "EQUITY", interval,
                         request_end - timedelta(days=lookback), request_end
                     )
+                    # Dhan intraday timestamps label candle starts. Exclude the still-forming
+                    # bar so EMA/VWAP/volume and the 3:15 confirmation use closed candles only.
+                    bar_delta = pd.Timedelta(minutes=int(interval))
+                    completed_cutoff = pd.Timestamp(datetime.now(IST)) - bar_delta
+                    intra = intra.loc[intra.index <= completed_cutoff]
                     daily = _cached_daily_candles(
                         worker_client, client.client_id, item["security_id"], daily_start.isoformat()
                     )
@@ -226,7 +231,8 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                                 scan_end = datetime.now(IST)
                                 if latest_ts.tzinfo is None:
                                     latest_ts = latest_ts.tz_localize(IST)
-                                candle_age = (scan_end - latest_ts.to_pydatetime()).total_seconds() / 60
+                                candle_close_ts = latest_ts + pd.Timedelta(minutes=int(interval))
+                                candle_age = (scan_end - candle_close_ts.to_pydatetime()).total_seconds() / 60
                             except Exception:
                                 candle_age = 999.0
                             rank_ok = float(sig.get("rank_score",0)) >= float(pre_sig.get("rank_score",0)) - 15.0
@@ -281,7 +287,8 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                     candidate_ts = pd.Timestamp(candidate.get("signal_time"))
                     if candidate_ts.tzinfo is None:
                         candidate_ts = candidate_ts.tz_localize(IST)
-                    final_age = (scan_finished_at - candidate_ts.to_pydatetime()).total_seconds() / 60
+                    candidate_close_ts = candidate_ts + pd.Timedelta(minutes=int(interval))
+                    final_age = (scan_finished_at - candidate_close_ts.to_pydatetime()).total_seconds() / 60
                 except Exception:
                     final_age = 999.0
                 if 0 <= final_age <= int(interval) + 7:
@@ -298,10 +305,10 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
         if strategy == "BTST":
             from datetime import time as _time
             scan_clock = scan_started_at.time().replace(tzinfo=None)
-            if not (_time(15,15) <= scan_clock <= _time(15,29) and scan_finished_at.time().replace(tzinfo=None) <= _time(15,29,59)):
+            if not (_time(15,16) <= scan_clock <= _time(15,29) and scan_finished_at.time().replace(tzinfo=None) <= _time(15,29,59)):
                 phase = "OUTSIDE_WINDOW"
                 signals = []
-                diagnostics.append({"Stock":"BTST","Intraday candles":0,"Daily candles":0,"Status":"Run the one-click BTST scan between 3:15 PM and 3:29 PM IST."})
+                diagnostics.append({"Stock":"BTST","Intraday candles":0,"Daily candles":0,"Status":"Run the one-click BTST scan between 3:16 PM and 3:29 PM IST, after the 3:15 candle has closed."})
             else:
                 phase = "CONFIRMED" if signals else "NO_TRADE"
         st.session_state["btst_phase_status"] = phase
