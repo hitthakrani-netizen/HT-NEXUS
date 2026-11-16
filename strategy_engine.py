@@ -55,7 +55,19 @@ def _intraday_checks(intraday: pd.DataFrame, side: str):
     body_pct = abs(float(last.close) - float(last.open)) / rng
     close_location = (float(last.close) - float(last.low)) / rng
     strong_candle = bool(body_pct >= 0.60 and (close_location >= 0.80 if side == "LONG" else close_location <= 0.20))
-    fifteen = add_indicators(resample_ohlcv(intraday, "15min"))
+    fifteen = resample_ohlcv(intraday, "15min")
+    # Resampling uses right-labelled candle-end timestamps. Keep only 15m bars
+    # whose close time is no later than the end of the latest completed base candle.
+    try:
+        steps = intraday.index.to_series().diff().dropna()
+        base_step = steps[steps <= pd.Timedelta(minutes=30)].median()
+        if pd.isna(base_step) or base_step <= pd.Timedelta(0):
+            base_step = pd.Timedelta(minutes=1)
+        completed_until = (intraday.index[-1] + base_step).floor("15min")
+        fifteen = fifteen.loc[fifteen.index <= completed_until]
+    except Exception:
+        fifteen = fifteen.iloc[:-1] if len(fifteen) else fifteen
+    fifteen = add_indicators(fifteen) if len(fifteen) else fifteen
     mtf = False
     if len(fifteen) >= 55:
         m = fifteen.iloc[-1]
