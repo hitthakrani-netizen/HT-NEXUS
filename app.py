@@ -272,6 +272,11 @@ if "stock_signals" in st.session_state:
     signals=st.session_state["stock_signals"]
     st.subheader("Strongest NSE Stock BTST / SWING Signal")
     if signals:
+        phase = st.session_state.get("btst_phase_status", "NORMAL")
+        if strategy == "BTST" and phase == "SHORTLIST":
+            st.warning("3:00 PM SHORTLIST ONLY — આ હજી ટ્રેડ સિગ્નલ નથી. 3:15 PM પછી ફરી આખો F&O સ્કેન ચલાવો; એ જ સ્ટોક અને એ જ દિશા ફરી પાસ થાય તો જ FINAL થશે.")
+        elif strategy == "BTST" and phase == "CONFIRM":
+            st.success("3:15 PM RE-CONFIRMATION PASSED — હવે જ આ BTST setup final candidate ગણાશે.")
         # Keep exactly one highest-scoring qualifying stock; never mix weaker signals.
         best=max(signals,key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
         df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target 1":round(best.get("target1",best["target"]),2),"Target 2":round(best.get("target2",best["target"]),2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Rank Score":best.get("rank_score",0),"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
@@ -288,13 +293,17 @@ if "stock_signals" in st.session_state:
         if best.get("strategy") == "BTST" and best.get("btst_quality"):
             st.markdown("**BTST Closing Quality**")
             st.json(best["btst_quality"])
-        if best.get("score_label") in ("STRONG","QUALIFIED"):
+        if best.get("score_label") in ("STRONG","QUALIFIED") and not (strategy == "BTST" and phase == "SHORTLIST"):
             st.success(f"Qualified setup: {best['symbol']} | Entry ₹{best['entry']:.2f} | SL ₹{best['stop_loss']:.2f} | Target ₹{best['target']:.2f} | R:R 1:{best['risk_reward']:.2f}")
+        elif strategy == "BTST" and phase == "SHORTLIST":
+            st.info("Shortlist price levels are provisional. Do not enter a trade from this 3:00 PM result.")
         else:
             st.warning(f"Best WATCHLIST candidate only: {best['symbol']} | Score {best['score']}/100 — not a confirmed trade.")
         st.caption(f"Scanned {len(universe)} NSE Stock F&O underlyings; {len(signals)} passed stock confirmations.")
         option_result = st.session_state.get("stock_option_result")
-        if option_result and option_result.get("best"):
+        if strategy == "BTST" and phase == "SHORTLIST":
+            st.info("Option-chain validation will run only after the 3:15 PM stock re-confirmation.")
+        elif option_result and option_result.get("best"):
             contract = option_result["best"]
             st.success(f"FINAL OPTION-CHECKED CANDIDATE: {best['symbol']} {contract['Type']} {contract['Strike']} • Expiry {contract['Expiry']} • LTP ₹{contract['LTP']:.2f} • Indicative buy ₹{contract['BUY (Ask)']:.2f} • Spread {contract['Spread %']:.2f}% • OI {contract['OI']:,} • Volume {contract['Volume']:,}")
             st.caption(f"Premium SL ₹{contract['SL']:.2f} • T1 ₹{contract['Target 1']:.2f} • T2 ₹{contract['Target 2']:.2f} • Delta {contract['Delta']:.3f} • Read-only; no order is placed.")
