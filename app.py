@@ -161,6 +161,7 @@ if tv_file is not None:
         tv_screener = {}
 
 if st.button("📈 Scan ALL STOCK F&O — BTST / SWING",type="primary", disabled=not universe):
+    scan_started_at = datetime.now(IST)
     try:
         client=_dhan_client()
         signals=[]; diagnostics=[]; progress=st.progress(0)
@@ -206,19 +207,60 @@ if st.button("📈 Scan ALL STOCK F&O — BTST / SWING",type="primary", disabled
                 except Exception as e:
                     diagnostics.append({"Stock":item["symbol"],"Intraday candles":0,"Daily candles":0,"Status":str(e)[:500]})
                 progress.progress((i+1)/max(len(universe),1))
-        st.session_state["stock_signals"]=signals
         st.session_state["stock_diagnostics"]=diagnostics
-        # Only after scanning every eligible stock, validate the strongest candidate's option chain.
         st.session_state.pop("stock_option_result", None)
         st.session_state.pop("stock_option_error", None)
-        if signals:
-            strongest = max(signals, key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
+        phase = "NORMAL"
+        if strategy == "BTST":
+            scan_clock = scan_started_at.time().replace(tzinfo=None)
+            scan_date = scan_started_at.date().isoformat()
+            if datetime.strptime("15:00", "%H:%M").time() <= scan_clock < datetime.strptime("15:15", "%H:%M").time():
+                phase = "SHORTLIST"
+                if signals:
+                    first = max(signals, key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
+                    st.session_state["btst_shortlist"] = {"date":scan_date,"symbol":first["symbol"],"side":first["side"],"rank_score":float(first.get("rank_score",0)),"score":float(first.get("score",0))}
+                    signals = [first]
+                else:
+                    st.session_state.pop("btst_shortlist", None)
+            elif datetime.strptime("15:15", "%H:%M").time() <= scan_clock <= datetime.strptime("15:29", "%H:%M").time():
+                phase = "CONFIRM"
+                first = st.session_state.get("btst_shortlist", {})
+                confirmed = None
+                if first.get("date") != scan_date:
+                    diagnostics.append({"Stock":"BTST","Intraday candles":0,"Daily candles":0,"Status":"3:00 PM shortlist missing or from another trading day. No final signal."})
+                else:
+                    same_setup = [x for x in signals if x["symbol"] == first.get("symbol") and x["side"] == first.get("side")]
+                    if same_setup:
+                        candidate = max(same_setup,key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0))))
+                        try:
+                            signal_ts = pd.Timestamp(candidate.get("signal_time"))
+                            if signal_ts.tzinfo is None: signal_ts = signal_ts.tz_localize(IST)
+                            age_minutes = (scan_started_at - signal_ts.to_pydatetime()).total_seconds()/60
+                        except Exception:
+                            age_minutes = 999.0
+                        max_age = int(interval) + 7
+                        rank_ok = float(candidate.get("rank_score",0)) >= float(first.get("rank_score",0)) - 15.0
+                        if 0 <= age_minutes <= max_age and rank_ok and float(candidate.get("score",0)) >= 85.0:
+                            confirmed = candidate
+                        else:
+                            diagnostics.append({"Stock":first.get("symbol","BTST"),"Intraday candles":0,"Daily candles":0,"Status":f"3:15 re-confirmation failed: candle age {age_minutes:.1f}m (max {max_age}m), rank retained {rank_ok}, quality score {candidate.get('score',0)}."})
+                    else:
+                        diagnostics.append({"Stock":first.get("symbol","BTST"),"Intraday candles":0,"Daily candles":0,"Status":"3:15 re-confirmation failed: same stock and direction did not qualify again."})
+                signals = [confirmed] if confirmed else []
+            else:
+                phase = "OUTSIDE_WINDOW"
+                signals = []
+                diagnostics.append({"Stock":"BTST","Intraday candles":0,"Daily candles":0,"Status":"BTST live scan allowed only 3:00–3:29 PM IST. Run the 3:00 shortlist and 3:15 confirmation in order."})
+        st.session_state["btst_phase_status"] = phase
+        st.session_state["stock_signals"] = signals
+        # Only a confirmed BTST signal (or a Swing signal) proceeds to option-chain validation.
+        may_validate_options = bool(signals) and (strategy != "BTST" or phase == "CONFIRM")
+        if may_validate_options:
+            strongest = max(signals,key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
             underlying = next((x for x in universe if x["symbol"] == strongest["symbol"]), None)
             if underlying:
                 try:
-                    st.session_state["stock_option_result"] = scan_stock_option_chain(
-                        client, strongest["symbol"], underlying.get("fno_security_id", underlying["security_id"]), strongest["side"]
-                    )
+                    st.session_state["stock_option_result"] = scan_stock_option_chain(client,strongest["symbol"],underlying.get("fno_security_id",underlying["security_id"]),strongest["side"])
                 except Exception as option_exc:
                     st.session_state["stock_option_error"] = str(option_exc)
         else:
