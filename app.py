@@ -9,7 +9,6 @@ from strategy_engine import evaluate_symbol, market_regime, relative_strength
 from backtest import run_backtest
 from stock_options import scan_stock_option_chain
 from nse_market_data import NSEMarketData, NSEDataError
-from nifty_5star import evaluate_nifty_5star
 from tradingview_screener import parse_tradingview_csv, confirm_with_tradingview
 from fno_universe import load_nse_stock_fno_universe, UniverseError
 
@@ -58,7 +57,7 @@ h1 { font-size:1.55rem !important; } h2 { font-size:1.25rem !important; } h3 { f
 }
 </style>
 """, unsafe_allow_html=True)
-st.markdown("""<div style="padding:22px 18px;border-radius:22px;background:linear-gradient(130deg,#101d38,#18527a,#07858a);color:white;margin:4px 0 18px"><div style="font-size:.72rem;letter-spacing:.16em;font-weight:800">DHAN LIVE DATA • TECHNICAL SCANNER</div><div style="font-size:2rem;font-weight:900;margin-top:5px">⚡ HT NEXUS</div><div style="font-size:.9rem">STOCK BTST · SWING · OPTIONS DATA</div><div style="margin-top:12px;font-size:.75rem;font-weight:750">LIVE DATA　•　TWO TARGETS + SL　•　READ-ONLY SIGNALS</div></div>""",unsafe_allow_html=True)
+st.markdown("""<div style="padding:22px 18px;border-radius:22px;background:linear-gradient(130deg,#101d38,#18527a,#07858a);color:white;margin:4px 0 18px"><div style="font-size:.72rem;letter-spacing:.16em;font-weight:800">DHAN LIVE DATA • TECHNICAL SCANNER</div><div style="font-size:2rem;font-weight:900;margin-top:5px">⚡ HT NEXUS</div><div style="font-size:.9rem">STOCK BTST · SWING · LIVE MARKET DATA</div><div style="margin-top:12px;font-size:.75rem;font-weight:750">LIVE DATA　•　TWO TARGETS + SL　•　READ-ONLY SIGNALS</div></div>""",unsafe_allow_html=True)
 
 def _secret_or_env(key: str) -> str:
     """Read optional Streamlit secret safely; fall back to environment."""
@@ -228,15 +227,6 @@ if st.button("📈 Scan ALL STOCK F&O — BTST / SWING",type="primary", disabled
         st.error(f"Data/API error: {e}")
 
 if "stock_signals" in st.session_state:
-    regime=st.session_state.get("nifty_regime",{"regime":"UNKNOWN","reason":"NIFTY data unavailable"})
-    st.subheader("NIFTY 50 Market Confirmation")
-    st.metric("NIFTY Regime",regime.get("regime","UNKNOWN"))
-    st.caption(regime.get("reason",""))
-    ns=st.session_state.get("nifty_signal")
-    if ns:
-        st.success(f"NIFTY {ns['side']} setup • Score {ns['score']}/100 • Entry {ns['entry']:.2f} • SL {ns['stop_loss']:.2f} • Target {ns['target']:.2f}")
-    else:
-        st.info("NIFTY પર હાલ બધા confirmation મળ્યા નથી — index પર NO TRADE.")
     signals=st.session_state["stock_signals"]
     st.subheader("Strongest NSE Stock BTST / SWING Signal")
     if signals:
@@ -361,7 +351,7 @@ if st.session_state.get("nse_market_snapshot") is not None:
 st.caption("NSE market data may be delayed, rate-limited or changed by NSE. OI/volume/turnover do not identify buyer vs seller by themselves. Cross-check with Dhan live option chain before a trade.")
 
 st.divider()
-st.subheader("📊 STOCK OPTIONS — CE / PE BTST")
+st.subheader("📊 STOCK SIGNAL — CE / PE OPTION-CHAIN CHECK")
 st.caption("Stock scan માંથી મળેલા શેર માટે Dhan option chain, buy price, stop loss અને બે targets.")
 stock_signal_list = st.session_state.get("stock_signals", [])
 stock_symbols = list(dict.fromkeys([x.get("symbol") for x in stock_signal_list if x.get("symbol")] + [x["symbol"] for x in universe]))
@@ -414,196 +404,6 @@ if isinstance(st.session_state.get("stock_option_result"), dict) and st.session_
         st.warning("Stock direction confirmation નથી અથવા કોઈ યોગ્ય liquid contract નથી. CALL/PUT માંથી trade force કરવામાં આવતો નથી.")
 else:
     st.caption("પહેલા ઉપર Stock BTST / SWING scan કરો, પછી અહીં એ શેરનું CE / PE scan કરો.")
-
-st.divider()
-st.subheader("🧭 NIFTY OPTIONS — BTST CALL / PUT")
-st.caption("NIFTY trend અને live option-chain liquidity પરથી CALL/PUT ઉમેદવાર પસંદ કરે છે. માત્ર screening; auto order નથી.")
-if st.button("🔎 Scan NIFTY CALL & PUT", type="primary", key="scan_nifty_options"):
-    try:
-        client = _dhan_client()
-        with st.spinner("NIFTY trend, expiry અને option chain તપાસી રહ્યા છીએ..."):
-            end = datetime.now(IST).replace(tzinfo=None)
-            nd = client.daily(nifty_id, "IDX_I", "INDEX", datetime.now(IST).date()-timedelta(days=daily_lookback))
-            ni = client.intraday(nifty_id, "IDX_I", "INDEX", interval, end-timedelta(days=lookback), end)
-            # 5-STAR is an optional NIFTY-only add-on: its data failure must never stop the option-chain scan.
-            try:
-                nifty_5m = client.intraday(nifty_id, "IDX_I", "INDEX", "5", end-timedelta(days=10), end)
-                nifty_1m = client.intraday(nifty_id, "IDX_I", "INDEX", "1", end-timedelta(days=3), end)
-                st.session_state["nifty_5star"] = evaluate_nifty_5star(nifty_5m, nifty_1m)
-            except Exception as five_error:
-                st.session_state["nifty_5star"] = {"status":"DATA_UNAVAILABLE","reason":f"5-STAR data fetch failed: {five_error}"}
-            regime = market_regime(nd)
-            from indicators import add_indicators
-            ix = add_indicators(ni)
-            direction = "NEUTRAL"
-            nifty_candle_check = "Insufficient completed candles."
-            if len(ix) >= 60:
-                z = ix.iloc[-1]
-                candle_range = max(float(z.high - z.low), 1e-9)
-                body_pct = abs(float(z.close - z.open)) / candle_range
-                close_location = (float(z.close - z.low)) / candle_range
-                volume_ok = bool(pd.notna(z.volume_ratio) and float(z.volume_ratio) >= 1.50)
-                strong_bull = body_pct >= 0.60 and close_location >= 0.80
-                strong_bear = body_pct >= 0.60 and close_location <= 0.20
-                if z.close > z.ema20 > z.ema50 and z.rsi14 >= 50 and z.macd > z.macd_signal and z.close > z.vwap and strong_bull and volume_ok:
-                    direction = "BULLISH"
-                    nifty_candle_check = f"Strong bullish candle; body {body_pct:.0%}; close near high; relative volume {float(z.volume_ratio):.2f}x."
-                elif z.close < z.ema20 < z.ema50 and z.rsi14 <= 50 and z.macd < z.macd_signal and z.close < z.vwap and strong_bear and volume_ok:
-                    direction = "BEARISH"
-                    nifty_candle_check = f"Strong bearish candle; body {body_pct:.0%}; close near low; relative volume {float(z.volume_ratio):.2f}x."
-                else:
-                    nifty_candle_check = f"No strong directional confirmation: body {body_pct:.0%}, relative volume {float(z.volume_ratio):.2f}x; require body >=60%, close in outer 20%, volume >=1.5x."
-            daily_direction = regime.get("regime", "NEUTRAL")
-            intraday_direction = direction
-            st.session_state["nifty_candle_check"] = nifty_candle_check
-            # Show the intraday direction without a hard high-confidence gate.
-            # Daily/intraday agreement is displayed separately for the user to judge.
-            direction = intraday_direction
-            expiries = client.option_expiries(nifty_id, "IDX_I")
-            today = datetime.now(IST).date()
-            valid_expiries = []
-            for value in expiries:
-                try:
-                    dt = datetime.strptime(str(value), "%Y-%m-%d").date()
-                    if dt >= today:
-                        valid_expiries.append(dt)
-                except ValueError:
-                    pass
-            valid_expiries.sort()
-            if not valid_expiries:
-                raise ValueError("Dhan returned no current/future NIFTY expiry.")
-            expiry = valid_expiries[0].isoformat()
-            chain = client.option_chain(nifty_id, expiry, "IDX_I")
-            data = chain.get("data", {}) if isinstance(chain, dict) else {}
-            spot = float(data.get("last_price", 0) or 0)
-            oc = data.get("oc", {})
-            rows = []
-            if not isinstance(oc, dict) or spot <= 0:
-                raise ValueError("Dhan option-chain response has no valid spot/strike data.")
-            for strike_text, pair in oc.items():
-                try:
-                    strike = float(strike_text)
-                except (TypeError, ValueError):
-                    continue
-                if not isinstance(pair, dict):
-                    continue
-                for key, label in (("ce", "CALL"), ("pe", "PUT")):
-                    leg = pair.get(key)
-                    if not isinstance(leg, dict):
-                        continue
-                    bid = float(leg.get("top_bid_price", 0) or 0)
-                    ask = float(leg.get("top_ask_price", 0) or 0)
-                    ltp = float(leg.get("last_price", 0) or 0)
-                    volume = int(leg.get("volume", 0) or 0)
-                    oi = int(leg.get("oi", 0) or 0)
-                    greeks = leg.get("greeks") or {}
-                    try:
-                        delta = float(greeks.get("delta", 0) or 0)
-                    except (TypeError, ValueError):
-                        delta = 0.0
-                    mid = (bid+ask)/2 if bid > 0 and ask > 0 else 0
-                    spread = (ask-bid)/mid if mid > 0 and ask >= bid else 999
-                    abs_delta = abs(delta)
-                    if bid > 0 and ask >= bid and ltp > 0 and volume > 0 and oi > 0 and int(leg.get("top_bid_quantity",0) or 0) > 0 and int(leg.get("top_ask_quantity",0) or 0) > 0 and spread <= 0.12 and 0.35 <= abs_delta <= 0.70:
-                        score = 30 + min(volume/100000, 20) + min(oi/1000000, 20) + max(0, 20-abs(abs_delta-0.55)*100) + max(0, 10-spread*100)
-                        entry_price = ask
-                        stop_price = round(entry_price * 0.85, 2)
-                        risk_per_unit = entry_price - stop_price
-                        target1_price = round(entry_price + risk_per_unit, 2)
-                        target2_price = round(entry_price + (2 * risk_per_unit), 2)
-                        previous_oi = int(leg.get("previous_oi", 0) or 0)
-                        previous_volume = int(leg.get("previous_volume", 0) or 0)
-                        previous_close = float(leg.get("previous_close_price", 0) or 0)
-                        oi_change = oi - previous_oi
-                        oi_change_pct = (oi_change / previous_oi * 100) if previous_oi > 0 else 0.0
-                        premium_change_pct = ((ltp / previous_close) - 1) * 100 if previous_close > 0 else 0.0
-                        volume_ratio = (volume / previous_volume) if previous_volume > 0 else 0.0
-                        bid_qty = int(leg.get("top_bid_quantity", 0) or 0)
-                        ask_qty = int(leg.get("top_ask_quantity", 0) or 0)
-                        depth_imbalance = ((bid_qty - ask_qty) / (bid_qty + ask_qty)) if (bid_qty + ask_qty) > 0 else 0.0
-                        rows.append({"Type":label,"Strike":strike,"Expiry":expiry,"LTP":round(ltp,2),"Buy Price (Ask)":round(entry_price,2),"Stop Loss":stop_price,"Target 1":target1_price,"Target 2":target2_price,"Spread %":round(spread*100,2),"Delta":round(delta,3),"Volume":volume,"Previous Volume":previous_volume,"Volume vs Prev Day":round(volume_ratio,2),"OI":oi,"Previous OI":previous_oi,"OI Change":oi_change,"OI Change %":round(oi_change_pct,2),"Premium Change %":round(premium_change_pct,2),"Bid Qty":bid_qty,"Ask Qty":ask_qty,"Depth Imbalance":round(depth_imbalance,3),"Score":round(score,1),"Distance":abs(strike-spot),"Security ID":leg.get("security_id")})
-            calls = sorted([r for r in rows if r["Type"]=="CALL"],key=lambda r:(-r["Score"],r["Distance"]))
-            puts = sorted([r for r in rows if r["Type"]=="PUT"],key=lambda r:(-r["Score"],r["Distance"]))
-            # Compare the five closest strikes to spot, rather than far OTM contracts.
-            near_strikes = sorted({r["Strike"] for r in rows}, key=lambda strike: abs(strike-spot))[:5]
-            near_rows = [r for r in rows if r["Strike"] in near_strikes]
-            def flow_summary(side):
-                group = [r for r in near_rows if r["Type"] == side]
-                if not group:
-                    return {"volume":0,"oi_change":0,"premium_change":0.0,"depth":0.0,"contracts":0}
-                total_depth = sum(r["Bid Qty"] + r["Ask Qty"] for r in group)
-                return {
-                    "volume":sum(r["Volume"] for r in group),
-                    "oi_change":sum(r["OI Change"] for r in group),
-                    "premium_change":round(sum(r["Premium Change %"] for r in group)/len(group),2),
-                    "depth":round(sum(r["Depth Imbalance"]*(r["Bid Qty"]+r["Ask Qty"]) for r in group)/total_depth,3) if total_depth else 0.0,
-                    "contracts":len(group),
-                }
-            call_flow, put_flow = flow_summary("CALL"), flow_summary("PUT")
-            flow_bias = "CALL SIDE STRONGER" if call_flow["premium_change"] > put_flow["premium_change"] and call_flow["oi_change"] > 0 and call_flow["depth"] > 0 else "PUT SIDE STRONGER" if put_flow["premium_change"] > call_flow["premium_change"] and put_flow["oi_change"] > 0 and put_flow["depth"] > 0 else "MIXED / NO CLEAR EDGE"
-            st.session_state["nifty_option_scan"] = {"spot":spot,"expiry":expiry,"direction":direction,"regime":regime,"calls":calls[:5],"puts":puts[:5],"call_flow":call_flow,"put_flow":put_flow,"flow_bias":flow_bias,"near_strikes":near_strikes}
-    except Exception as e:
-        st.error(f"NIFTY option scan failed: {e}")
-
-if "nifty_option_scan" in st.session_state:
-    result = st.session_state["nifty_option_scan"]
-    st.metric("NIFTY Spot", f"{result['spot']:.2f}")
-    st.markdown("### ⭐ NIFTY 5-STAR Indicator (તમારી આપેલી Pine Script)")
-    five = st.session_state.get("nifty_5star", {"status":"DATA_UNAVAILABLE","reason":"Run NIFTY option scan to calculate."})
-    if five.get("status") == "SIGNAL":
-        fs = five["signal"]
-        st.success(f"5-STAR {fs['side']} SIGNAL • {fs['time']} IST • NIFTY Entry {fs['entry']:.2f} • SL {fs['stop_loss']:.2f} • T1 {fs['target1']:.2f} • T2 {fs['target2']:.2f} • 3m Volume {fs['volume_3m']:,}")
-        st.caption(f"EMA21 ₹{fs['ema21']:.2f} • VWAP ₹{fs['vwap']:.2f} • VWMA20 ₹{fs['vwma20']:.2f} • Supertrend ₹{fs['supertrend']:.2f}")
-    elif five.get("status") == "NO_SIGNAL":
-        st.info(f"5-STAR: NO SIGNAL — {five.get('reason','')}")
-    else:
-        st.warning(f"5-STAR DATA UNAVAILABLE — {five.get('reason','Check Dhan candle data.')}")
-    st.caption("Pine inputs: EMA21, VWAP, VWMA20, Supertrend(10,3), 3m volume ≥125,000, bar close, 09:31–15:00, one signal/day. Chart timeframe mapped to 5m.")
-    daily_direction = result["regime"].get("regime", "NEUTRAL")
-    intraday_direction = result["direction"]
-    aligned = daily_direction == intraday_direction and intraday_direction in ("BULLISH", "BEARISH")
-    st.write(f"**Daily:** {daily_direction} | **Intraday:** {intraday_direction} | **Expiry:** {result['expiry']}")
-    st.markdown("**ATM નજીક Option Flow (Spotની આસપાસના 5 strikes)**")
-    flow_cols = st.columns(2)
-    with flow_cols[0]:
-        st.metric("CALL premium change", f"{result['call_flow']['premium_change']:+.2f}%")
-        st.caption(f"OI change: {result['call_flow']['oi_change']:,} | Volume: {result['call_flow']['volume']:,} | Bid/Ask depth: {result['call_flow']['depth']:+.3f}")
-    with flow_cols[1]:
-        st.metric("PUT premium change", f"{result['put_flow']['premium_change']:+.2f}%")
-        st.caption(f"OI change: {result['put_flow']['oi_change']:,} | Volume: {result['put_flow']['volume']:,} | Bid/Ask depth: {result['put_flow']['depth']:+.3f}")
-    if result["flow_bias"] == "CALL SIDE STRONGER":
-        st.success("Option flow: CALL side stronger — આ એક supporting clue છે, એકલું BUY signal નથી.")
-    elif result["flow_bias"] == "PUT SIDE STRONGER":
-        st.success("Option flow: PUT side stronger — આ એક supporting clue છે, એકલું BUY signal નથી.")
-    else:
-        st.info("Option flow mixed છે — સ્પષ્ટ CALL/PUT dominance નથી.")
-    st.caption("OI change અને premium change previous session સામે છે; depth snapshot છે. આ data પરથી એકલા buyer/seller ની ઓળખ થતી નથી.")
-    if aligned:
-        st.success("MATCH — Daily અને Intraday એક જ દિશામાં છે.")
-    else:
-        st.warning("NO MATCH — Daily અને Intraday અલગ છે અથવા trend સ્પષ્ટ નથી. તમારી નીતિ મુજબ trade ટાળો.")
-    left, right = st.columns(2)
-    with left:
-        st.markdown("**CALL candidates**")
-        if result["calls"]: st.dataframe(pd.DataFrame(result["calls"]),use_container_width=True,hide_index=True)
-        else: st.info("No CALL contract passed liquidity filters.")
-    with right:
-        st.markdown("**PUT candidates**")
-        if result["puts"]: st.dataframe(pd.DataFrame(result["puts"]),use_container_width=True,hide_index=True)
-        else: st.info("No PUT contract passed liquidity filters.")
-    # Only allow a NIFTY option preference when Daily and Intraday directions match.
-    five = st.session_state.get("nifty_5star", {})
-    five_signal = five.get("signal") if five.get("status") == "SIGNAL" else None
-    preferred = five_signal["side"] if five_signal else (("CALL" if result["direction"] == "BULLISH" else "PUT") if aligned else None)
-    best_list = result["calls"] if preferred=="CALL" else result["puts"] if preferred=="PUT" else []
-    if best_list:
-        best = best_list[0]
-        st.success(f"{'5-STAR MATCH' if five_signal else 'BTST preference'}: {preferred} {best['Strike']} • BUY near ₹{best['Buy Price (Ask)']:.2f} • SL ₹{best['Stop Loss']:.2f} • T1 ₹{best['Target 1']:.2f} • T2 ₹{best['Target 2']:.2f} • Liquidity score {best['Score']}/100")
-        if five_signal:
-            st.caption(f"Strike selected from Dhan live chain to match 5-STAR {five_signal['side']}; NIFTY underlying entry ₹{five_signal['entry']:.2f}, not option premium.")
-        st.caption("Risk model: 15% premium stop; Target 1 = 1R (+15%), Target 2 = 2R (+30%). Ask is indicative, not guaranteed fill. These are formula-based planning levels, not tested predictions; confirm live spread and risk before entry.")
-    else:
-        st.warning("NO TRADE — intraday trend સ્પષ્ટ નથી અથવા કોઈ contract liquidity checks પાસ કરતો નથી.")
 
 with st.expander("Historical Backtesting"):
     st.caption("Single-stock historical test; historical performance does not guarantee future results.")
