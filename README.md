@@ -1,7 +1,7 @@
 # HT NEXUS
 
 Read-only DhanHQ v2 NSE stock scanner with exactly two strategies:
-- **BTST:** one button press between 15:15–15:29 IST scans each F&O stock once, internally checks 15:00–15:14 shortlist evidence and fresh 15:15+ confirmation, then automatically validates the matching stock CALL/PUT option chain.
+- **BTST:** one button press between 15:15–15:29 IST scans each F&O stock once, internally checks 15:00–15:14 shortlist evidence and fresh 15:15+ confirmation, then automatically validates the matching stock CALL/PUT option chain. Incomplete 15-minute resample candles are excluded from confirmation.
 - **SWING:** intended 1–3 trading-session holding window.
 
 The app is a research/paper-trading scaffold. It does **not** place, modify, or cancel orders.
