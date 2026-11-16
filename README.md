@@ -1,7 +1,7 @@
 # HT NEXUS
 
 Read-only DhanHQ v2 NSE stock scanner with exactly two strategies:
-- **BTST:** one button press between 15:15–15:29 IST scans each F&O stock once, internally checks 15:00–15:14 shortlist evidence and fresh 15:15+ confirmation, then automatically validates the matching stock CALL/PUT option chain. Incomplete 15-minute resample candles are excluded from confirmation.
+- **BTST:** one button press between 15:16–15:29 IST scans each F&O stock once, internally checks 15:00–15:14 shortlist evidence and the completed 15:15+ confirmation candle, then automatically validates the matching stock CALL/PUT option chain. Incomplete base and 15-minute candles are excluded from confirmation.
 - **SWING:** intended 1–3 trading-session holding window.
 
 The app is a research/paper-trading scaffold. It does **not** place, modify, or cancel orders.
@@ -115,14 +115,14 @@ This software is for research/education only, not investment advice. No return, 
 
 The scanner does not require Render or a paid TradingView webhook plan. It uses DhanHQ market data directly from the Streamlit Community Cloud app. TradingView Free alerts are not automatically delivered to this app; no unsupported scraping, account-password sharing, or unofficial TradingView API is used.
 
-The app scans the full configured NSE stock F&O universe when the user presses **ONE-CLICK SCAN — STOCK + CALL / PUT**. BTST is available from 3:15–3:29 PM IST: one pass checks each stock's 3:00–3:14 PM shortlist evidence and fresh 3:15+ confirmation using the same candles, then fetches the matching stock CALL (LONG) or PUT (SHORT) option chain automatically. No separate CE/PE scan is required. NIFTY is not used as a stock filter or trade signal. SWING can be scanned outside the BTST window. The app is read-only and does not place orders.
+The app scans the full configured NSE stock F&O universe when the user presses **ONE-CLICK SCAN — STOCK + CALL / PUT**. BTST is available from 3:16–3:29 PM IST so the 3:15 one-minute candle has time to close: one pass checks each stock's 3:00–3:14 PM shortlist evidence and completed 3:15+ confirmation using the same candles, then fetches the matching stock CALL (LONG) or PUT (SHORT) option chain automatically. No separate CE/PE scan is required. Four parallel workers overlap network latency, a process-wide throttle stays below Dhan's 5 historical-data requests/second limit, and completed daily candles are cached for 12 hours. The app records total scan duration. NIFTY is not used as a stock filter or trade signal. SWING can be scanned outside the BTST window. The app is read-only and does not place orders.
 
 NIFTY 50 default Dhan ID 13 in segment IDX_I is supported by Dhan instrument references; verify the ID if Dhan returns a data error. Setup scores are technical confluence scores, not probabilities or guarantees. Backtest and paper-test before considering any live trade.
 
 
 ## Automatic Stock Options CE/PE
 
-The single stock scan automatically requests the selected stock's active F&O expiry and option chain from DhanHQ using the NSE_FNO underlying segment. A LONG stock signal maps to CE/CALL; a SHORT stock signal maps to PE/PUT. The app filters for live bid/ask depth, volume, open interest, spread and delta, then displays indicative buy (ask), premium stop, Target 1 and Target 2 in the same scan result. There is no separate stock selector or CE/PE scan button. If the stock has no active F&O contracts or no liquid matching contract passes, it displays no option trade rather than forcing a recommendation.
+The single stock scan automatically requests the selected stock's active F&O expiry and option chain from DhanHQ using the NSE_FNO underlying segment, observing the documented 3-second option-chain request interval. A LONG stock signal maps to CE/CALL; a SHORT stock signal maps to PE/PUT. The app filters for live bid/ask depth, volume, open interest, spread and delta, then displays indicative buy (ask), premium stop, Target 1 and Target 2 in the same scan result. There is no separate stock selector or CE/PE scan button. If the stock has no active F&O contracts or no liquid matching contract passes, it displays no option trade rather than forcing a recommendation.
 
 The dashboard includes a mobile-responsive visual layout. On Android Chrome, use the browser menu and choose **Add to Home screen** (or **Install app**, if offered) to create a home-screen shortcut. This remains a Streamlit web app, not a native APK. Option-chain values and formula-based targets are indicative, not guaranteed fills or tested profit forecasts. No orders are placed.
 
