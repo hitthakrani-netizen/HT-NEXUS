@@ -17,31 +17,40 @@ def _cost_rate(brokerage_bps: float, slippage_bps: float) -> float:
 
 
 def _signal_at(intra: pd.DataFrame, daily: pd.DataFrame, regime: dict, strategy: str, i: int):
-    """Use the exact live strategy engine on data available through bar i.
+    """Use only candles available at the historical decision time.
 
-    The live BTST clock gate is bypassed by invoking the shared engine as SWING;
-    the historical BTST time window is enforced here against the historical bar.
+    BTST requires a qualifying 3:00–3:14 PM shortlist and the same direction
+    to qualify again from 3:15–3:29 PM. The backtest never looks forward.
     """
+    from datetime import time as _time
     history = intra.iloc[:i + 1]
     if len(history) < 220 or daily is None or len(daily) < 60:
         return None
-    if strategy == "BTST":
-        from datetime import time as _time
-        local_time = history.index[-1].time().replace(tzinfo=None)
-        if not (_time(15, 15) <= local_time <= _time(15, 29)):
-            return None
-    # Reuse the requested strategy's exact filters (including BTST close-strength checks).
-    # enforce_btst_window stays False because the historical timestamp was checked above.
     signal = evaluate_symbol(
-        "BACKTEST",
-        history,
-        daily,
+        "BACKTEST", history, daily,
         regime or {"regime": "STOCK_ONLY", "reason": "Historical stock-only test"},
-        strategy=strategy,
-        enforce_btst_window=False,
+        strategy=strategy, enforce_btst_window=False,
     )
     if signal is None:
         return None
+    if strategy == "BTST":
+        local_time = history.index[-1].time().replace(tzinfo=None)
+        if not (_time(15, 15) <= local_time <= _time(15, 29)):
+            return None
+        pre_confirm = history.loc[
+            (history.index.time >= _time(15, 0)) &
+            (history.index.time < _time(15, 15))
+        ]
+        if pre_confirm.empty:
+            return None
+        candidate_history = history.loc[:pre_confirm.index[-1]]
+        candidate = evaluate_symbol(
+            "BACKTEST", candidate_history, daily,
+            regime or {"regime": "STOCK_ONLY", "reason": "Historical stock-only test"},
+            strategy="BTST", enforce_btst_window=False,
+        )
+        if candidate is None or candidate["side"] != signal["side"]:
+            return None
     return signal["side"], float(signal["entry"]), float(signal["atr"])
 
 
@@ -100,9 +109,15 @@ def run_backtest(
             side = pos["side"]
             stop_hit = bar.low <= pos["stop"] if side == "LONG" else bar.high >= pos["stop"]
             target_hit = bar.high >= pos["target"] if side == "LONG" else bar.low <= pos["target"]
+            open_gap_stop = bar.open <= pos["stop"] if side == "LONG" else bar.open >= pos["stop"]
+            open_gap_target = bar.open >= pos["target"] if side == "LONG" else bar.open <= pos["target"]
             exit_price = None
             reason = None
-            if stop_hit:
+            if open_gap_stop:
+                exit_price, reason = float(bar.open), "GAP STOP (filled at adverse session open)"
+            elif open_gap_target:
+                exit_price, reason = float(bar.open), "GAP THROUGH TARGET (open fill)"
+            elif stop_hit:
                 exit_price, reason = pos["stop"], "STOP (stop-first same-bar rule)"
             elif target_hit:
                 exit_price, reason = pos["target"], "TARGET"
