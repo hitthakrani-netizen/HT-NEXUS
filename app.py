@@ -393,59 +393,29 @@ if st.session_state.get("nse_market_snapshot") is not None:
 st.caption("NSE market data may be delayed, rate-limited or changed by NSE. OI/volume/turnover do not identify buyer vs seller by themselves. Cross-check with Dhan live option chain before a trade.")
 
 st.divider()
-st.subheader("📊 STOCK SIGNAL — CE / PE OPTION-CHAIN CHECK")
-st.caption("Stock scan માંથી મળેલા શેર માટે Dhan option chain, buy price, stop loss અને બે targets.")
-stock_signal_list = st.session_state.get("stock_signals", [])
-stock_symbols = list(dict.fromkeys([x.get("symbol") for x in stock_signal_list if x.get("symbol")] + [x["symbol"] for x in universe]))
-if stock_symbols:
-    selected_stock = st.selectbox("Select scanned stock", stock_symbols, key="stock_option_select")
-    selected_signal = next((x for x in stock_signal_list if x.get("symbol") == selected_stock), None)
-    stock_bias = selected_signal.get("side") if selected_signal and selected_signal.get("score_label") in ("STRONG","QUALIFIED") else None
-    if selected_signal:
-        st.caption(f"Stock signal: {stock_bias} • {selected_signal.get('score_label','WATCHLIST')} • Score {selected_signal.get('score',0)}/100")
-    if st.button("🔎 Scan STOCK CE / PE", type="primary", key="stock_ce_pe_scan"):
-        try:
-            item = next(x for x in universe if x["symbol"] == selected_stock)
-            with st.spinner(f"{selected_stock} option chain checking..."):
-                st.session_state["stock_option_result"] = scan_stock_option_chain(_dhan_client(), selected_stock, item.get("fno_security_id") or item["security_id"], stock_bias)
-        except Exception as e:
-            st.error(f"Stock option scan failed: {e}")
-if isinstance(st.session_state.get("stock_option_result"), dict) and st.session_state["stock_option_result"].get("symbol") == (selected_stock if stock_symbols else None):
-    sr = st.session_state["stock_option_result"]
-    st.metric(f"{sr['symbol']} Spot", f"₹{sr['spot']:.2f}")
-    st.caption(f"Expiry: {sr['expiry']} • Stock direction: {sr['bias'] or 'No confirmed stock signal'}")
-    st.markdown("**ATM નજીક Stock Option Flow (spotની આસપાસના 5 strikes)**")
+st.subheader("📊 AUTOMATIC STOCK OPTION RESULT")
+st.caption("આ વિભાગ ઉપરના ONE-CLICK SCAN માંથી જ data બતાવે છે. અહીં અલગ stock selection કે CE/PE scan button નથી.")
+auto_option = st.session_state.get("stock_option_result")
+if isinstance(auto_option, dict):
+    st.metric(f"{auto_option['symbol']} Spot", f"₹{auto_option['spot']:.2f}")
+    st.caption(f"Expiry: {auto_option['expiry']} • Stock direction: {auto_option['bias'] or 'No confirmed stock signal'}")
     flow_cols = st.columns(2)
     with flow_cols[0]:
-        st.metric("CE premium change", f"{sr['call_flow']['premium_change']:+.2f}%")
-        st.caption(f"OI change: {sr['call_flow']['oi_change']:,} | Volume: {sr['call_flow']['volume']:,} | Depth: {sr['call_flow']['depth']:+.3f}")
+        st.metric("CALL / CE premium change", f"{auto_option['call_flow']['premium_change']:+.2f}%")
+        st.caption(f"OI change: {auto_option['call_flow']['oi_change']:,} • Volume: {auto_option['call_flow']['volume']:,}")
     with flow_cols[1]:
-        st.metric("PE premium change", f"{sr['put_flow']['premium_change']:+.2f}%")
-        st.caption(f"OI change: {sr['put_flow']['oi_change']:,} | Volume: {sr['put_flow']['volume']:,} | Depth: {sr['put_flow']['depth']:+.3f}")
-    if sr["flow_bias"] == "CALL SIDE STRONGER":
-        st.success("Stock CE flow stronger — supporting evidence only.")
-    elif sr["flow_bias"] == "PUT SIDE STRONGER":
-        st.success("Stock PE flow stronger — supporting evidence only.")
+        st.metric("PUT / PE premium change", f"{auto_option['put_flow']['premium_change']:+.2f}%")
+        st.caption(f"OI change: {auto_option['put_flow']['oi_change']:,} • Volume: {auto_option['put_flow']['volume']:,}")
+    if auto_option.get("best"):
+        contract = auto_option["best"]
+        st.success(f"RECOMMENDED {contract['Type']} — {auto_option['symbol']} {contract['Strike']} • Expiry {contract['Expiry']} • LTP ₹{contract['LTP']:.2f} • Buy Ask ₹{contract['BUY (Ask)']:.2f}")
+        st.caption(f"Premium SL ₹{contract['SL']:.2f} • Target 1 ₹{contract['Target 1']:.2f} • Target 2 ₹{contract['Target 2']:.2f} • Spread {contract['Spread %']:.2f}% • OI {contract['OI']:,} • Volume {contract['Volume']:,} • Delta {contract['Delta']:.3f}")
     else:
-        st.info("Stock option flow mixed — no clear CE/PE edge.")
-    st.caption("Previous OI/close comparison and live depth are supporting clues, not proof of net buyer identity.")
-    left, right = st.columns(2)
-    with left:
-        st.markdown("**CALL / CE candidates**")
-        if sr["calls"]: st.dataframe(pd.DataFrame(sr["calls"]), use_container_width=True, hide_index=True)
-        else: st.info("No CALL passed liquidity filters.")
-    with right:
-        st.markdown("**PUT / PE candidates**")
-        if sr["puts"]: st.dataframe(pd.DataFrame(sr["puts"]), use_container_width=True, hide_index=True)
-        else: st.info("No PUT passed liquidity filters.")
-    if sr["best"]:
-        b = sr["best"]
-        st.success(f"{sr['symbol']} {sr['preferred']} {b['Strike']} • BUY ₹{b['BUY (Ask)']:.2f} • SL ₹{b['SL']:.2f} • T1 ₹{b['Target 1']:.2f} • T2 ₹{b['Target 2']:.2f} • Score {b['Score']}/100")
-        st.caption("CE follows LONG stock signal; PE follows SHORT stock signal. Premium SL 15%, targets 1R/2R are planning levels only, not backtested forecasts.")
-    else:
-        st.warning("Stock direction confirmation નથી અથવા કોઈ યોગ્ય liquid contract નથી. CALL/PUT માંથી trade force કરવામાં આવતો નથી.")
+        st.warning("Stock setup passed, but its matching CALL/PUT did not pass liquidity filters. No option trade.")
+elif st.session_state.get("stock_option_error"):
+    st.warning("Automatic option-chain check failed: " + str(st.session_state["stock_option_error"]))
 else:
-    st.caption("પહેલા ઉપર Stock BTST / SWING scan કરો, પછી અહીં એ શેરનું CE / PE scan કરો.")
+    st.caption("એક જ ONE-CLICK SCAN ચલાવો; qualified stock મળશે તો તેનું matching CALL/PUT અહીં આપમેળે દેખાશે.")
 
 with st.expander("Historical Backtesting"):
     st.caption("Single-stock historical test; historical performance does not guarantee future results.")
