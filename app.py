@@ -235,6 +235,23 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                     diagnostics.append({"Stock":item["symbol"],"Intraday candles":0,"Daily candles":0,"Status":str(e)[:500]})
                 progress.progress((i+1)/max(len(universe),1))
         scan_finished_at = datetime.now(IST)
+        if strategy == "BTST" and signals:
+            fresh_signals = []
+            for candidate in signals:
+                try:
+                    candidate_ts = pd.Timestamp(candidate.get("signal_time"))
+                    if candidate_ts.tzinfo is None:
+                        candidate_ts = candidate_ts.tz_localize(IST)
+                    final_age = (scan_finished_at - candidate_ts.to_pydatetime()).total_seconds() / 60
+                except Exception:
+                    final_age = 999.0
+                if 0 <= final_age <= int(interval) + 7:
+                    candidate["confirmation_candle_age_min"] = round(final_age,1)
+                    fresh_signals.append(candidate)
+                else:
+                    diagnostics.append({"Stock":candidate.get("symbol","BTST"),"Intraday candles":0,"Daily candles":0,
+                        "Status":"Rejected after full scan: confirmation candle became stale ("+str(round(final_age,1))+" minutes old)."})
+            signals = fresh_signals
         st.session_state["stock_diagnostics"]=diagnostics
         st.session_state.pop("stock_option_result", None)
         st.session_state.pop("stock_option_error", None)
