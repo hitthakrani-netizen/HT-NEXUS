@@ -1,7 +1,7 @@
 # HT NEXUS
 
 Read-only DhanHQ v2 NSE stock scanner with exactly two strategies:
-- **BTST:** signal generation restricted to 15:15–15:29 IST.
+- **BTST:** shortlist all F&O stocks from 15:00–15:14 IST, then require the same stock and direction to pass a fresh full-universe re-scan from 15:15–15:29 IST. Only the second-stage confirmation can proceed to option-chain validation.
 - **SWING:** intended 1–3 trading-session holding window.
 
 The app is a research/paper-trading scaffold. It does **not** place, modify, or cancel orders.
@@ -74,7 +74,7 @@ Long/short candidates require:
 - 20-bar breakout/breakdown with volume at least 1.5x 20-bar average.
 - Resampled 15-minute confirmation.
 - False-breakout guard: close beyond prior range and limited wick retracement.
-- ATR-based stop at 1.5 ATR and target at 2.5 ATR (nominal 1:1.67 before costs).
+- ATR-based stop at 1.5 ATR and target at 2.5 ATR (nominal 1:1.67 before costs); backtest default risk is 0.5% of equity per trade.
 - NIFTY regime is context only and is not a mandatory stock-signal filter. BTST uses stock-level closing quality, not NIFTY direction.
 - Only the highest-scoring eligible candidate is displayed; otherwise NO TRADE.
 
@@ -86,7 +86,7 @@ These are transparent starting parameters, not an assertion of accuracy. Backtes
 - The backtest requires at least 210 daily candles and 250 intraday bars; it uses only data available before the signal date for the market-regime calculation.
 - Same-bar stop and target touches are resolved conservatively as stop first.
 - Slippage and brokerage are simplified configurable assumptions; taxes, exchange charges, STT, GST, stamp duty, bid/ask spread, liquidity/impact, circuit limits, corporate actions, survivorship bias, delisted stocks and rejected fills are not fully modeled.
-- The BTST historical exit logic is approximate. Validate with day-level execution assumptions and actual next-session opening/exit rules before use.
+- BTST backtests require the same stock and direction to qualify in both the 15:00–15:14 shortlist and the 15:15–15:29 confirmation windows. Opening gaps are filled at the observed session open when that price crosses the stop or target; remaining BTST positions exit at the next-session close. This is still an OHLC approximation.
 - Multi-timeframe resampling and session boundaries should be reviewed against exchange trading calendars and candle timestamps.
 - Do not compare parameter sets on the same data used to choose them. Use walk-forward and out-of-sample validation, then paper trade.
 
@@ -115,7 +115,7 @@ This software is for research/education only, not investment advice. No return, 
 
 The scanner does not require Render or a paid TradingView webhook plan. It uses DhanHQ market data directly from the Streamlit Community Cloud app. TradingView Free alerts are not automatically delivered to this app; no unsupported scraping, account-password sharing, or unofficial TradingView API is used.
 
-The app scans the full configured NSE stock F&O universe when the user presses **Scan ALL STOCK F&O — BTST / SWING**. NIFTY daily regime and relative strength are context/ranking information only; NIFTY is not a required filter. NIFTY data errors are shown separately and the stock scan continues without index confirmation. BTST is time-gated to 3:15–3:29 PM IST; SWING can be scanned outside that window. The app is read-only and does not place orders.
+The app scans the full configured NSE stock F&O universe when the user presses **Scan ALL STOCK F&O — BTST / SWING**. NIFTY daily regime and relative strength are context/ranking information only; NIFTY is not a required filter. NIFTY data errors are shown separately and the stock scan continues without index confirmation. BTST requires a 3:00–3:14 PM shortlist followed by a 3:15–3:29 PM full-universe re-confirmation of the same stock and direction; only then does option-chain validation run. SWING can be scanned outside that window. The app is read-only and does not place orders.
 
 NIFTY 50 default Dhan ID 13 in segment IDX_I is supported by Dhan instrument references; verify the ID if Dhan returns a data error. Setup scores are technical confluence scores, not probabilities or guarantees. Backtest and paper-test before considering any live trade.
 
