@@ -1,5 +1,6 @@
 """Read-only Dhan stock option-chain screening for HT NEXUS."""
 from datetime import datetime
+import time
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -20,6 +21,9 @@ def scan_stock_option_chain(client, symbol, security_id, bias=None):
     if not valid:
         raise ValueError(f"{symbol}: no active stock-option expiry from Dhan; verify F&O eligibility and underlying ID.")
     expiry = min(valid).isoformat()
+    # Dhan Option Chain endpoint is limited to one request per 3 seconds.
+    # Expiry-list lookup is performed immediately before this; leave a safe gap.
+    time.sleep(3.05)
     chain = client.option_chain(security_id, expiry, "NSE_FNO")
     data = chain.get("data", {}) if isinstance(chain, dict) else {}
     spot = float(data.get("last_price", 0) or 0)
