@@ -207,6 +207,7 @@ if st.button("📈 Scan ALL STOCK F&O — BTST / SWING",type="primary", disabled
                 except Exception as e:
                     diagnostics.append({"Stock":item["symbol"],"Intraday candles":0,"Daily candles":0,"Status":str(e)[:500]})
                 progress.progress((i+1)/max(len(universe),1))
+        scan_finished_at = datetime.now(IST)
         st.session_state["stock_diagnostics"]=diagnostics
         st.session_state.pop("stock_option_result", None)
         st.session_state.pop("stock_option_error", None)
@@ -222,7 +223,7 @@ if st.button("📈 Scan ALL STOCK F&O — BTST / SWING",type="primary", disabled
                     signals = [first]
                 else:
                     st.session_state.pop("btst_shortlist", None)
-            elif datetime.strptime("15:15", "%H:%M").time() <= scan_clock <= datetime.strptime("15:29", "%H:%M").time():
+            elif datetime.strptime("15:15", "%H:%M").time() <= scan_clock <= datetime.strptime("15:29", "%H:%M").time() and scan_finished_at.time().replace(tzinfo=None) <= datetime.strptime("15:29:59", "%H:%M:%S").time():
                 phase = "CONFIRM"
                 first = st.session_state.get("btst_shortlist", {})
                 confirmed = None
