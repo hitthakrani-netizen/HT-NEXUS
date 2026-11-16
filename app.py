@@ -168,6 +168,10 @@ if tv_file is not None:
 
 if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabled=not universe):
     scan_started_at = datetime.now(IST)
+    # Never leave yesterday's/previous-strategy signal visible if this scan errors or returns NO TRADE.
+    for stale_key in ("stock_signals", "stock_signals_strategy", "stock_option_result",
+                      "stock_option_error", "scan_duration_sec", "btst_phase_status"):
+        st.session_state.pop(stale_key, None)
     try:
         client=_dhan_client()
         signals=[]; diagnostics=[]; progress=st.progress(0)
@@ -313,6 +317,7 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                 phase = "CONFIRMED" if signals else "NO_TRADE"
         st.session_state["btst_phase_status"] = phase
         st.session_state["stock_signals"] = signals
+        st.session_state["stock_signals_strategy"] = strategy
         # One-click flow: validate the selected stock's matching CALL/PUT automatically.
         may_validate_options = bool(signals) and (strategy != "BTST" or phase == "CONFIRMED")
         if may_validate_options:
@@ -332,7 +337,7 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
 if "scan_duration_sec" in st.session_state:
     st.caption(f"Last one-click scan completed in {st.session_state['scan_duration_sec']:.1f} seconds (includes automatic option-chain check when a stock qualifies).")
 
-if "stock_signals" in st.session_state:
+if "stock_signals" in st.session_state and st.session_state.get("stock_signals_strategy") == strategy:
     signals=st.session_state["stock_signals"]
     st.subheader("Strongest NSE Stock BTST / SWING Signal")
     if signals:
