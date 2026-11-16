@@ -134,8 +134,8 @@ c1.metric("Strategy",strategy)
 c2.metric("NSE Stock F&O",len(universe))
 c3.metric("IST",datetime.now(IST).strftime("%d %b %Y, %H:%M:%S"))
 
-if strategy=="BTST" and not (datetime.strptime("15:15","%H:%M").time()<=datetime.now(IST).time().replace(tzinfo=None)<=datetime.strptime("15:29","%H:%M").time()):
-    st.info("BTST live scan window: 3:15 PM–3:29 PM IST. Historical Backtesting can run anytime.")
+if strategy=="BTST" and not (datetime.strptime("15:00","%H:%M").time()<=datetime.now(IST).time().replace(tzinfo=None)<=datetime.strptime("15:29","%H:%M").time()):
+    st.info("BTST signal window: 3:00 PM–3:29 PM IST. Outside this window, the scan uses the latest available candles for review; validate only signals captured during the live window.")
 
 if st.button("🔌 Test Dhan API Connection"):
     try:
@@ -212,7 +212,7 @@ if st.button("📈 Scan ALL STOCK F&O — BTST / SWING",type="primary", disabled
         st.session_state.pop("stock_option_result", None)
         st.session_state.pop("stock_option_error", None)
         if signals:
-            strongest = max(signals, key=lambda x:(float(x.get("score",0)),float(x.get("risk_reward",0))))
+            strongest = max(signals, key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
             underlying = next((x for x in universe if x["symbol"] == strongest["symbol"]), None)
             if underlying:
                 try:
@@ -231,8 +231,8 @@ if "stock_signals" in st.session_state:
     st.subheader("Strongest NSE Stock BTST / SWING Signal")
     if signals:
         # Keep exactly one highest-scoring qualifying stock; never mix weaker signals.
-        best=max(signals,key=lambda x:(float(x.get("score",0)),float(x.get("risk_reward",0))))
-        df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target 1":round(best.get("target1",best["target"]),2),"Target 2":round(best.get("target2",best["target"]),2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
+        best=max(signals,key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
+        df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target 1":round(best.get("target1",best["target"]),2),"Target 2":round(best.get("target2",best["target"]),2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Rank Score":best.get("rank_score",0),"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
         st.dataframe(df,use_container_width=True,hide_index=True)
         st.write(best["reasons"])
         tvc = best.get("tradingview_confirmation", {})
