@@ -78,7 +78,7 @@ with st.sidebar:
         token=st.text_input("Dhan Access Token", value=_secret_or_env("DHAN_ACCESS_TOKEN"), type="password")
         st.info("For daily automatic login, configure DHAN_PIN and DHAN_TOTP_SECRET once in Streamlit Secrets.")
     strategy=st.selectbox("Strategy",["BTST","SWING"])
-    interval=st.selectbox("Intraday candle interval (minutes)",["5","15","1"],index=0)
+    interval=st.selectbox("Intraday candle interval (minutes)",["1","5","15"],index=0)
     lookback=st.slider("Intraday history (days)",7,90,30)
     daily_lookback=st.slider("Daily history (calendar days)",250,1500,500,step=50)
     capital=st.number_input("Backtest capital (₹)",min_value=10000,value=100000,step=10000)
@@ -134,8 +134,8 @@ c1.metric("Strategy",strategy)
 c2.metric("NSE Stock F&O",len(universe))
 c3.metric("IST",datetime.now(IST).strftime("%d %b %Y, %H:%M:%S"))
 
-if strategy=="BTST" and not (datetime.strptime("15:00","%H:%M").time()<=datetime.now(IST).time().replace(tzinfo=None)<=datetime.strptime("15:29","%H:%M").time()):
-    st.info("BTST signal window: 3:00 PM–3:29 PM IST. Outside this window, the scan uses the latest available candles for review; validate only signals captured during the live window.")
+if strategy=="BTST" and not (datetime.strptime("15:15","%H:%M").time()<=datetime.now(IST).time().replace(tzinfo=None)<=datetime.strptime("15:29","%H:%M").time()):
+    st.info("BTST ONE-CLICK window: 3:15 PM–3:29 PM IST. One scan internally checks the 3:00–3:14 shortlist and fresh 3:15+ confirmation, then fetches the matching stock CALL/PUT automatically.")
 
 if st.button("🔌 Test Dhan API Connection"):
     try:
@@ -160,34 +160,61 @@ if tv_file is not None:
         st.error(f"TradingView CSV error: {tv_error}")
         tv_screener = {}
 
-if st.button("📈 Scan ALL STOCK F&O — BTST / SWING",type="primary", disabled=not universe):
+if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabled=not universe):
     scan_started_at = datetime.now(IST)
     try:
         client=_dhan_client()
         signals=[]; diagnostics=[]; progress=st.progress(0)
         with st.spinner("Scanning NSE stocks independently; NIFTY is context only..."):
             end=datetime.now(IST).replace(tzinfo=None)
-            nifty_daily=pd.DataFrame()
-            nifty_regime={"regime":"NEUTRAL","reason":"NIFTY data not available; stock signals will not receive index confirmation."}
-            nifty_signal=None
-            try:
-                nifty_daily=client.daily(nifty_id,"IDX_I","INDEX",datetime.now(IST).date()-timedelta(days=daily_lookback))
-                nifty_intraday=client.intraday(nifty_id,"IDX_I","INDEX",interval,end-timedelta(days=lookback),end)
-                nifty_regime=market_regime(nifty_daily)
-                nifty_signal=evaluate_symbol("NIFTY",nifty_intraday,nifty_daily,nifty_regime,strategy=strategy,enforce_btst_window=False)
-            except Exception as nifty_error:
-                st.warning(f"NIFTY data unavailable: {nifty_error}. Stock scan will continue without index confirmation.")
-            st.session_state["nifty_regime"]=nifty_regime
-            st.session_state["nifty_signal"]=nifty_signal
-            st.session_state["nifty_daily"]=nifty_daily
+            # Stock-only scan: skip index requests so they cannot delay or filter stock candidates.
+            nifty_daily = pd.DataFrame()
+            nifty_regime = {"regime":"STOCK_ONLY","reason":"NIFTY is not used as a filter or trade signal."}
+            st.session_state["nifty_regime"] = nifty_regime
+            st.session_state["nifty_signal"] = None
+            st.session_state["nifty_daily"] = nifty_daily
             for i,item in enumerate(universe):
                 try:
                     end=datetime.now(IST).replace(tzinfo=None)
                     intra=client.intraday(item["security_id"],"NSE_EQ","EQUITY",interval,end-timedelta(days=lookback),end)
                     daily=client.daily(item["security_id"],"NSE_EQ","EQUITY",datetime.now(IST).date()-timedelta(days=daily_lookback))
                     diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Data OK" if len(intra)>=220 and len(daily)>=205 else f"Insufficient history: need 220 intraday / 205 daily; got {len(intra)} / {len(daily)}"})
-                    srs=relative_strength(daily,nifty_daily) if not nifty_daily.empty else None
+                    srs = None
                     sig=evaluate_symbol(item["symbol"],intra,daily,nifty_regime,strategy=strategy,sector_relative_strength=srs,enforce_btst_window=False)
+                    if strategy == "BTST":
+                        # One pass: derive the 3:00–3:14 shortlist from the same candles,
+                        # then validate the same stock/direction on the latest 3:15+ candle.
+                        from datetime import time as _time
+                        scan_day = scan_started_at.date()
+                        today_mask = intra.index.date == scan_day
+                        pre_mask = today_mask & (intra.index.time >= _time(15,0)) & (intra.index.time < _time(15,15))
+                        post_mask = today_mask & (intra.index.time >= _time(15,15))
+                        pre_rows = intra.loc[pre_mask]
+                        post_rows = intra.loc[post_mask]
+                        pre_sig = None
+                        if not pre_rows.empty and not post_rows.empty:
+                            pre_history = intra.loc[intra.index <= pre_rows.index[-1]]
+                            pre_sig = evaluate_symbol(item["symbol"],pre_history,daily,nifty_regime,strategy="BTST",sector_relative_strength=None,enforce_btst_window=False)
+                        if not pre_sig or not sig or pre_sig["side"] != sig["side"]:
+                            sig = None
+                        else:
+                            try:
+                                latest_ts = pd.Timestamp(intra.index[-1])
+                                scan_end = datetime.now(IST)
+                                if latest_ts.tzinfo is None:
+                                    latest_ts = latest_ts.tz_localize(IST)
+                                candle_age = (scan_end - latest_ts.to_pydatetime()).total_seconds() / 60
+                            except Exception:
+                                candle_age = 999.0
+                            rank_ok = float(sig.get("rank_score",0)) >= float(pre_sig.get("rank_score",0)) - 15.0
+                            fresh_ok = 0 <= candle_age <= int(interval) + 7
+                            if not (rank_ok and fresh_ok and float(sig.get("score",0)) >= 85.0):
+                                diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),
+                                    "Status":"Rejected: 3:15+ confirmation failed (fresh candle="+str(fresh_ok)+", age="+str(round(candle_age,1))+"m, rank retained="+str(rank_ok)+")."})
+                                sig = None
+                            else:
+                                sig["pre_confirmation_rank"] = float(pre_sig.get("rank_score",0))
+                                sig["confirmation_candle_age_min"] = round(candle_age,1)
                     if sig and tv_screener is not None:
                         tv_check = confirm_with_tradingview(sig, tv_screener)
                         sig["tradingview_confirmation"] = tv_check
@@ -213,49 +240,18 @@ if st.button("📈 Scan ALL STOCK F&O — BTST / SWING",type="primary", disabled
         st.session_state.pop("stock_option_error", None)
         phase = "NORMAL"
         if strategy == "BTST":
+            from datetime import time as _time
             scan_clock = scan_started_at.time().replace(tzinfo=None)
-            scan_date = scan_started_at.date().isoformat()
-            if datetime.strptime("15:00", "%H:%M").time() <= scan_clock < datetime.strptime("15:15", "%H:%M").time():
-                phase = "SHORTLIST"
-                if signals:
-                    first = max(signals, key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
-                    st.session_state["btst_shortlist"] = {"date":scan_date,"symbol":first["symbol"],"side":first["side"],"rank_score":float(first.get("rank_score",0)),"score":float(first.get("score",0))}
-                    signals = [first]
-                else:
-                    st.session_state.pop("btst_shortlist", None)
-            elif datetime.strptime("15:15", "%H:%M").time() <= scan_clock <= datetime.strptime("15:29", "%H:%M").time() and scan_finished_at.time().replace(tzinfo=None) <= datetime.strptime("15:29:59", "%H:%M:%S").time():
-                phase = "CONFIRM"
-                first = st.session_state.get("btst_shortlist", {})
-                confirmed = None
-                if first.get("date") != scan_date:
-                    diagnostics.append({"Stock":"BTST","Intraday candles":0,"Daily candles":0,"Status":"3:00 PM shortlist missing or from another trading day. No final signal."})
-                else:
-                    same_setup = [x for x in signals if x["symbol"] == first.get("symbol") and x["side"] == first.get("side")]
-                    if same_setup:
-                        candidate = max(same_setup,key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0))))
-                        try:
-                            signal_ts = pd.Timestamp(candidate.get("signal_time"))
-                            if signal_ts.tzinfo is None: signal_ts = signal_ts.tz_localize(IST)
-                            age_minutes = (scan_started_at - signal_ts.to_pydatetime()).total_seconds()/60
-                        except Exception:
-                            age_minutes = 999.0
-                        max_age = int(interval) + 7
-                        rank_ok = float(candidate.get("rank_score",0)) >= float(first.get("rank_score",0)) - 15.0
-                        if 0 <= age_minutes <= max_age and rank_ok and float(candidate.get("score",0)) >= 85.0:
-                            confirmed = candidate
-                        else:
-                            diagnostics.append({"Stock":first.get("symbol","BTST"),"Intraday candles":0,"Daily candles":0,"Status":f"3:15 re-confirmation failed: candle age {age_minutes:.1f}m (max {max_age}m), rank retained {rank_ok}, quality score {candidate.get('score',0)}."})
-                    else:
-                        diagnostics.append({"Stock":first.get("symbol","BTST"),"Intraday candles":0,"Daily candles":0,"Status":"3:15 re-confirmation failed: same stock and direction did not qualify again."})
-                signals = [confirmed] if confirmed else []
-            else:
+            if not (_time(15,15) <= scan_clock <= _time(15,29) and scan_finished_at.time().replace(tzinfo=None) <= _time(15,29,59)):
                 phase = "OUTSIDE_WINDOW"
                 signals = []
-                diagnostics.append({"Stock":"BTST","Intraday candles":0,"Daily candles":0,"Status":"BTST live scan allowed only 3:00–3:29 PM IST. Run the 3:00 shortlist and 3:15 confirmation in order."})
+                diagnostics.append({"Stock":"BTST","Intraday candles":0,"Daily candles":0,"Status":"Run the one-click BTST scan between 3:15 PM and 3:29 PM IST."})
+            else:
+                phase = "CONFIRMED" if signals else "NO_TRADE"
         st.session_state["btst_phase_status"] = phase
         st.session_state["stock_signals"] = signals
-        # Only a confirmed BTST signal (or a Swing signal) proceeds to option-chain validation.
-        may_validate_options = bool(signals) and (strategy != "BTST" or phase == "CONFIRM")
+        # One-click flow: validate the selected stock's matching CALL/PUT automatically.
+        may_validate_options = bool(signals) and (strategy != "BTST" or phase == "CONFIRMED")
         if may_validate_options:
             strongest = max(signals,key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
             underlying = next((x for x in universe if x["symbol"] == strongest["symbol"]), None)
@@ -274,10 +270,8 @@ if "stock_signals" in st.session_state:
     st.subheader("Strongest NSE Stock BTST / SWING Signal")
     if signals:
         phase = st.session_state.get("btst_phase_status", "NORMAL")
-        if strategy == "BTST" and phase == "SHORTLIST":
-            st.warning("3:00 PM SHORTLIST ONLY — આ હજી ટ્રેડ સિગ્નલ નથી. 3:15 PM પછી ફરી આખો F&O સ્કેન ચલાવો; એ જ સ્ટોક અને એ જ દિશા ફરી પાસ થાય તો જ FINAL થશે.")
-        elif strategy == "BTST" and phase == "CONFIRM":
-            st.success("3:15 PM RE-CONFIRMATION PASSED — હવે જ આ BTST setup final candidate ગણાશે.")
+        if strategy == "BTST" and phase == "CONFIRMED":
+            st.success("ONE-CLICK BTST CONFIRMATION PASSED — 3:00–3:14 shortlist + fresh 3:15+ confirmation checked in one scan.")
         # Keep exactly one highest-scoring qualifying stock; never mix weaker signals.
         best=max(signals,key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
         df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target 1":round(best.get("target1",best["target"]),2),"Target 2":round(best.get("target2",best["target"]),2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Rank Score":best.get("rank_score",0),"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
@@ -294,17 +288,13 @@ if "stock_signals" in st.session_state:
         if best.get("strategy") == "BTST" and best.get("btst_quality"):
             st.markdown("**BTST Closing Quality**")
             st.json(best["btst_quality"])
-        if best.get("score_label") in ("STRONG","QUALIFIED") and not (strategy == "BTST" and phase == "SHORTLIST"):
+        if best.get("score_label") in ("STRONG","QUALIFIED"):
             st.success(f"Qualified setup: {best['symbol']} | Entry ₹{best['entry']:.2f} | SL ₹{best['stop_loss']:.2f} | Target ₹{best['target']:.2f} | R:R 1:{best['risk_reward']:.2f}")
-        elif strategy == "BTST" and phase == "SHORTLIST":
-            st.info("Shortlist price levels are provisional. Do not enter a trade from this 3:00 PM result.")
         else:
             st.warning(f"Best WATCHLIST candidate only: {best['symbol']} | Score {best['score']}/100 — not a confirmed trade.")
         st.caption(f"Scanned {len(universe)} NSE Stock F&O underlyings; {len(signals)} passed stock confirmations.")
         option_result = st.session_state.get("stock_option_result")
-        if strategy == "BTST" and phase == "SHORTLIST":
-            st.info("Option-chain validation will run only after the 3:15 PM stock re-confirmation.")
-        elif option_result and option_result.get("best"):
+        if option_result and option_result.get("best"):
             contract = option_result["best"]
             st.success(f"FINAL OPTION-CHECKED CANDIDATE: {best['symbol']} {contract['Type']} {contract['Strike']} • Expiry {contract['Expiry']} • LTP ₹{contract['LTP']:.2f} • Indicative buy ₹{contract['BUY (Ask)']:.2f} • Spread {contract['Spread %']:.2f}% • OI {contract['OI']:,} • Volume {contract['Volume']:,}")
             st.caption(f"Premium SL ₹{contract['SL']:.2f} • T1 ₹{contract['Target 1']:.2f} • T2 ₹{contract['Target 2']:.2f} • Delta {contract['Delta']:.3f} • Read-only; no order is placed.")
