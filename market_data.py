@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import time
+import threading
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Optional
 
@@ -16,6 +17,12 @@ import pyotp
 BASE_URL = "https://api.dhan.co/v2"
 IST = "Asia/Kolkata"
 VALID_INTRADAY_INTERVALS = {"1", "5", "15", "25", "60"}
+
+# Dhan v2 historical Data APIs are limited to 5 requests/second per client.
+# A process-wide gate keeps parallel stock scans below that documented ceiling.
+_DATA_API_LOCK = threading.Lock()
+_LAST_DATA_API_REQUEST = 0.0
+_DATA_API_MIN_INTERVAL = 0.205
 
 
 class DhanAPIError(RuntimeError):
@@ -196,6 +203,15 @@ class DhanDataClient:
         self._last_quote_request = 0.0
 
     def _post(self, path: str, payload: dict) -> dict:
+        global _LAST_DATA_API_REQUEST
+        # Historical chart endpoints share Dhan's 5 requests/second Data API cap.
+        # Reserve request start times globally before parallel workers issue HTTP calls.
+        if path in ("/charts/intraday", "/charts/historical"):
+            with _DATA_API_LOCK:
+                wait = _DATA_API_MIN_INTERVAL - (time.monotonic() - _LAST_DATA_API_REQUEST)
+                if wait > 0:
+                    time.sleep(wait)
+                _LAST_DATA_API_REQUEST = time.monotonic()
         url = f"{self.base_url}{path}"
         try:
             response = self.session.post(url, json=payload, timeout=self.timeout)
