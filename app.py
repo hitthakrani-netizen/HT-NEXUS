@@ -3,6 +3,7 @@ import os
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
 from market_data import DhanDataClient, generate_access_token, parse_universe
 from strategy_engine import evaluate_symbol, market_regime, relative_strength
@@ -79,7 +80,7 @@ with st.sidebar:
         st.info("For daily automatic login, configure DHAN_PIN and DHAN_TOTP_SECRET once in Streamlit Secrets.")
     strategy=st.selectbox("Strategy",["BTST","SWING"])
     interval=st.selectbox("Intraday candle interval (minutes)",["1","5","15"],index=0)
-    lookback=st.slider("Intraday history (days)",7,90,30)
+    lookback=st.slider("Intraday history (days)",20,90,20)
     daily_lookback=st.slider("Daily history (calendar days)",250,1500,500,step=50)
     capital=st.number_input("Backtest capital (₹)",min_value=10000,value=100000,step=10000)
     risk=st.slider("Risk per trade (%)",0.25,1.0,0.5,step=0.25)/100
@@ -119,6 +120,11 @@ def _dhan_client():
 @st.cache_data(ttl=21600, show_spinner=False)
 def _cached_fno_universe():
     return load_nse_stock_fno_universe()
+
+@st.cache_data(ttl=43200, show_spinner=False)
+def _cached_daily_candles(_client, client_id: str, security_id: str, from_date: str):
+    """Cache completed daily history per Dhan account/stock; current day is excluded by Dhan toDate."""
+    return _client.daily(security_id, "NSE_EQ", "EQUITY", datetime.strptime(from_date, "%Y-%m-%d").date())
 
 try:
     with st.spinner("Dhan masterમાંથી બધા NSE Stock F&O શેર load થઈ રહ્યા છે..."):
@@ -173,17 +179,31 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
             st.session_state["nifty_regime"] = nifty_regime
             st.session_state["nifty_signal"] = None
             st.session_state["nifty_daily"] = nifty_daily
-            for i,item in enumerate(universe):
+            daily_start = datetime.now(IST).date() - timedelta(days=daily_lookback)
+
+            def scan_one_stock(item):
+                """Fetch one stock's candles and evaluate it in an isolated HTTP session."""
                 try:
-                    end=datetime.now(IST).replace(tzinfo=None)
-                    intra=client.intraday(item["security_id"],"NSE_EQ","EQUITY",interval,end-timedelta(days=lookback),end)
-                    daily=client.daily(item["security_id"],"NSE_EQ","EQUITY",datetime.now(IST).date()-timedelta(days=daily_lookback))
-                    diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Data OK" if len(intra)>=220 and len(daily)>=205 else f"Insufficient history: need 220 intraday / 205 daily; got {len(intra)} / {len(daily)}"})
-                    srs = None
-                    sig=evaluate_symbol(item["symbol"],intra,daily,nifty_regime,strategy=strategy,sector_relative_strength=srs,enforce_btst_window=False)
+                    worker_client = DhanDataClient(client.client_id, client.access_token)
+                    request_end = datetime.now(IST).replace(tzinfo=None)
+                    intra = worker_client.intraday(
+                        item["security_id"], "NSE_EQ", "EQUITY", interval,
+                        request_end - timedelta(days=lookback), request_end
+                    )
+                    daily = _cached_daily_candles(
+                        worker_client, client.client_id, item["security_id"], daily_start.isoformat()
+                    )
+                    diagnostic = {
+                        "Stock": item["symbol"], "Intraday candles": len(intra), "Daily candles": len(daily),
+                        "Status": "Data OK" if len(intra) >= 220 and len(daily) >= 205
+                        else f"Insufficient history: need 220 intraday / 205 daily; got {len(intra)} / {len(daily)}"
+                    }
+                    sig = evaluate_symbol(
+                        item["symbol"], intra, daily, nifty_regime,
+                        strategy=strategy, sector_relative_strength=None, enforce_btst_window=False
+                    )
                     if strategy == "BTST":
-                        # One pass: derive the 3:00–3:14 shortlist from the same candles,
-                        # then validate the same stock/direction on the latest 3:15+ candle.
+                        # Derive both stages from the same fetched candle series.
                         from datetime import time as _time
                         scan_day = scan_started_at.date()
                         today_mask = intra.index.date == scan_day
@@ -194,7 +214,10 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                         pre_sig = None
                         if not pre_rows.empty and not post_rows.empty:
                             pre_history = intra.loc[intra.index <= pre_rows.index[-1]]
-                            pre_sig = evaluate_symbol(item["symbol"],pre_history,daily,nifty_regime,strategy="BTST",sector_relative_strength=None,enforce_btst_window=False)
+                            pre_sig = evaluate_symbol(
+                                item["symbol"], pre_history, daily, nifty_regime,
+                                strategy="BTST", sector_relative_strength=None, enforce_btst_window=False
+                            )
                         if not pre_sig or not sig or pre_sig["side"] != sig["side"]:
                             sig = None
                         else:
@@ -209,8 +232,10 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                             rank_ok = float(sig.get("rank_score",0)) >= float(pre_sig.get("rank_score",0)) - 15.0
                             fresh_ok = 0 <= candle_age <= int(interval) + 7
                             if not (rank_ok and fresh_ok and float(sig.get("score",0)) >= 85.0):
-                                diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),
-                                    "Status":"Rejected: 3:15+ confirmation failed (fresh candle="+str(fresh_ok)+", age="+str(round(candle_age,1))+"m, rank retained="+str(rank_ok)+")."})
+                                diagnostic["Status"] = (
+                                    "Rejected: 3:15+ confirmation failed "
+                                    f"(fresh={fresh_ok}, age={candle_age:.1f}m, rank retained={rank_ok})."
+                                )
                                 sig = None
                             else:
                                 sig["pre_confirmation_rank"] = float(pre_sig.get("rank_score",0))
@@ -218,22 +243,36 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                     if sig and tv_screener is not None:
                         tv_check = confirm_with_tradingview(sig, tv_screener)
                         sig["tradingview_confirmation"] = tv_check
-                        # When a screener file is supplied, require a matching symbol
-                        # and at least two aligned screener checks; otherwise reject.
                         if not tv_check.get("matched") or not tv_check.get("aligned"):
-                            diagnostics.append({"Stock":item["symbol"],"Intraday candles":len(intra),"Daily candles":len(daily),"Status":"Rejected: TradingView confirmation — "+tv_check.get("reason","No confirmation")})
+                            diagnostic["Status"] = "Rejected: TradingView confirmation — " + tv_check.get("reason","No confirmation")
                             sig = None
                         else:
-                            sig["score"] = min(100.0, float(sig.get("score", 0)) + 5.0)
-                            sig["reasons"] += "; TradingView: "+tv_check.get("reason","")
+                            sig["score"] = min(100.0, float(sig.get("score",0)) + 5.0)
+                            sig["reasons"] += "; TradingView: " + tv_check.get("reason","")
                     if sig:
-                        sig["sector"]=item["sector"]
+                        sig["sector"] = item["sector"]
                         if tv_screener is None:
-                            sig["tradingview_confirmation"] = {"matched": False, "aligned": False, "score": 0, "reason": "CSV not supplied; Dhan technical checks only."}
+                            sig["tradingview_confirmation"] = {
+                                "matched": False, "aligned": False, "score": 0,
+                                "reason": "CSV not supplied; Dhan technical checks only."
+                            }
+                    return diagnostic, sig
+                except Exception as exc:
+                    return {
+                        "Stock": item.get("symbol","UNKNOWN"), "Intraday candles": 0,
+                        "Daily candles": 0, "Status": str(exc)[:500]
+                    }, None
+
+            # Four isolated workers overlap network latency; market_data.py globally
+            # throttles chart requests to stay below Dhan's 5 requests/second Data API cap.
+            with ThreadPoolExecutor(max_workers=4, thread_name_prefix="htnexus-scan") as pool:
+                futures = [pool.submit(scan_one_stock, item) for item in universe]
+                for i, future in enumerate(as_completed(futures), start=1):
+                    diagnostic, sig = future.result()
+                    diagnostics.append(diagnostic)
+                    if sig:
                         signals.append(sig)
-                except Exception as e:
-                    diagnostics.append({"Stock":item["symbol"],"Intraday candles":0,"Daily candles":0,"Status":str(e)[:500]})
-                progress.progress((i+1)/max(len(universe),1))
+                    progress.progress(i / max(len(universe),1))
         scan_finished_at = datetime.now(IST)
         if strategy == "BTST" and signals:
             fresh_signals = []
@@ -279,8 +318,12 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                     st.session_state["stock_option_error"] = str(option_exc)
         else:
             st.session_state["stock_option_result"] = None
+        st.session_state["scan_duration_sec"] = round((datetime.now(IST) - scan_started_at).total_seconds(), 1)
     except Exception as e:
         st.error(f"Data/API error: {e}")
+
+if "scan_duration_sec" in st.session_state:
+    st.caption(f"Last one-click scan completed in {st.session_state['scan_duration_sec']:.1f} seconds (includes automatic option-chain check when a stock qualifies).")
 
 if "stock_signals" in st.session_state:
     signals=st.session_state["stock_signals"]
