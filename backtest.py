@@ -60,7 +60,7 @@ def run_backtest(
     daily: pd.DataFrame,
     strategy: str = "BTST",
     capital: float = 100000,
-    risk_per_trade: float = 0.01,
+    risk_per_trade: float = 0.005,
     brokerage_bps: float = 2.0,
     slippage_bps: float = 5.0,
     max_holding_sessions: int = 3,
