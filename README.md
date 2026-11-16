@@ -1,7 +1,7 @@
-# HT NEXUS PRO
+# HT NEXUS
 
-Read-only DhanHQ v2 NIFTY + NSE stock scanner with exactly two strategies:
-- **BTST:** signal generation restricted to 15:15–15:29 IST.
+Read-only DhanHQ v2 NSE stock scanner with exactly two strategies:
+- **BTST:** one button press between 15:16–15:29 IST scans each F&O stock once, internally checks 15:00–15:14 shortlist evidence and the completed 15:15+ confirmation candle, then automatically validates the matching stock CALL/PUT option chain. Incomplete base and 15-minute candles are excluded from confirmation.
 - **SWING:** intended 1–3 trading-session holding window.
 
 The app is a research/paper-trading scaffold. It does **not** place, modify, or cancel orders.
@@ -10,7 +10,7 @@ The app is a research/paper-trading scaffold. It does **not** place, modify, or 
 - `app.py` — responsive Streamlit dashboard, scan controls, one-best-signal view, backtest and paper journal.
 - `market_data.py` — DhanHQ v2 read-only REST adapter for quotes and historical candles.
 - `indicators.py` — EMA, RSI, MACD, VWAP, ATR, volume ratio and breakout levels.
-- `strategy_engine.py` — NIFTY market regime filter, relative-strength helper, multi-timeframe and false-breakout checks, risk levels.
+- `strategy_engine.py` — stock-only BTST/SWING confirmation engine, optional market context, multi-timeframe and false-breakout checks, risk levels.
 - `backtest.py` — basic OHLC backtest with conservative stop-first same-bar handling.
 - `README.md` — setup and validation.
 
@@ -47,7 +47,7 @@ Do not paste credentials into source code, screenshots, GitHub, or chat. Add `.s
 
 ## NIFTY + stock confirmation
 
-The scanner fetches NIFTY 50 daily and intraday candles using Dhan segment `IDX_I`, instrument `INDEX`, and the default security ID `13` (editable in the sidebar). It displays a separate NIFTY setup and uses the NIFTY daily regime as a directional filter for stock BTST/SWING candidates. Confirm the index security ID against the current Dhan instrument master if the API rejects it. This is the scanner's own Dhan-based technical confirmation; it does not ingest private/proprietary TradingView indicator alerts.
+NIFTY/index data may be displayed as optional market context and relative-strength reference only. It is never a mandatory filter, never replaces a stock candidate, and never creates a separate index trade signal. Stock BTST/SWING eligibility is decided from the stock's own candles and confirmations. Confirm any configured index instrument ID against the current Dhan instrument master.
 
 ## Universe and instrument IDs
 The sidebar accepts one row per stock:
@@ -74,7 +74,7 @@ Long/short candidates require:
 - 20-bar breakout/breakdown with volume at least 1.5x 20-bar average.
 - Resampled 15-minute confirmation.
 - False-breakout guard: close beyond prior range and limited wick retracement.
-- ATR-based stop at 1.5 ATR and target at 2.5 ATR (nominal 1:1.67 before costs).
+- ATR-based stop at 1.5 ATR and target at 2.5 ATR (nominal 1:1.67 before costs); backtest default risk is 0.5% of equity per trade.
 - NIFTY regime is context only and is not a mandatory stock-signal filter. BTST uses stock-level closing quality, not NIFTY direction.
 - Only the highest-scoring eligible candidate is displayed; otherwise NO TRADE.
 
@@ -86,7 +86,7 @@ These are transparent starting parameters, not an assertion of accuracy. Backtes
 - The backtest requires at least 210 daily candles and 250 intraday bars; it uses only data available before the signal date for the market-regime calculation.
 - Same-bar stop and target touches are resolved conservatively as stop first.
 - Slippage and brokerage are simplified configurable assumptions; taxes, exchange charges, STT, GST, stamp duty, bid/ask spread, liquidity/impact, circuit limits, corporate actions, survivorship bias, delisted stocks and rejected fills are not fully modeled.
-- The BTST historical exit logic is approximate. Validate with day-level execution assumptions and actual next-session opening/exit rules before use.
+- BTST backtests require the same stock and direction to qualify in both the 15:00–15:14 shortlist and the 15:15–15:29 confirmation windows. Opening gaps are filled at the observed session open when that price crosses the stop or target; remaining BTST positions exit at the next-session close. This is still an OHLC approximation.
 - Multi-timeframe resampling and session boundaries should be reviewed against exchange trading calendars and candle timestamps.
 - Do not compare parameter sets on the same data used to choose them. Use walk-forward and out-of-sample validation, then paper trade.
 
@@ -115,13 +115,17 @@ This software is for research/education only, not investment advice. No return, 
 
 The scanner does not require Render or a paid TradingView webhook plan. It uses DhanHQ market data directly from the Streamlit Community Cloud app. TradingView Free alerts are not automatically delivered to this app; no unsupported scraping, account-password sharing, or unofficial TradingView API is used.
 
-The app scans the full configured NSE stock F&O universe when the user presses **Scan ALL STOCK F&O — BTST / SWING**. NIFTY daily regime and relative strength are context/ranking information only; NIFTY is not a required filter. NIFTY data errors are shown separately and the stock scan continues without index confirmation. BTST is time-gated to 3:15–3:29 PM IST; SWING can be scanned outside that window. The app is read-only and does not place orders.
+The app scans the full configured NSE stock F&O universe when the user presses **ONE-CLICK SCAN — STOCK + CALL / PUT**. BTST is available from 3:16–3:29 PM IST so the 3:15 one-minute candle has time to close: one pass checks each stock's 3:00–3:14 PM shortlist evidence and completed 3:15+ confirmation using the same candles, then fetches the matching stock CALL (LONG) or PUT (SHORT) option chain automatically. No separate CE/PE scan is required. Four parallel workers overlap network latency, a process-wide throttle stays below Dhan's 5 historical-data requests/second limit, and completed daily candles are cached for 12 hours. The app records total scan duration. NIFTY is not used as a stock filter or trade signal. SWING can be scanned outside the BTST window. The app is read-only and does not place orders.
 
 NIFTY 50 default Dhan ID 13 in segment IDX_I is supported by Dhan instrument references; verify the ID if Dhan returns a data error. Setup scores are technical confluence scores, not probabilities or guarantees. Backtest and paper-test before considering any live trade.
 
 
-## Stock Options CE/PE BTST panel
+## Automatic Stock Options CE/PE
 
-After running the NSE stock BTST/SWING scan, select a stock and run **Scan STOCK CE / PE**. The scanner requests the stock's active F&O expiry and option chain from DhanHQ using the NSE_FNO underlying segment. A LONG stock signal maps to CE/CALL; a SHORT stock signal maps to PE/PUT. The panel filters for live bid/ask depth, volume, open interest, spread and delta, then displays indicative buy (ask), 15% premium stop, Target 1 (1R) and Target 2 (2R). If the stock has no active F&O contracts or no liquid contract passes the filters, it displays no trade rather than forcing a recommendation.
+The single stock scan automatically requests the selected stock's active F&O expiry and option chain from DhanHQ using the NSE_FNO underlying segment, observing the documented 3-second option-chain request interval. A LONG stock signal maps to CE/CALL; a SHORT stock signal maps to PE/PUT. The app filters for live bid/ask depth, volume, open interest, spread and delta, then displays indicative buy (ask), premium stop, Target 1 and Target 2 in the same scan result. There is no separate stock selector or CE/PE scan button. If the stock has no active F&O contracts or no liquid matching contract passes, it displays no option trade rather than forcing a recommendation.
 
 The dashboard includes a mobile-responsive visual layout. On Android Chrome, use the browser menu and choose **Add to Home screen** (or **Install app**, if offered) to create a home-screen shortcut. This remains a Streamlit web app, not a native APK. Option-chain values and formula-based targets are indicative, not guaranteed fills or tested profit forecasts. No orders are placed.
+
+
+## Automated code validation
+The pull request includes GitHub Actions checks for Python syntax and the repository's existing unit tests. A pre-existing literal-newline syntax error in `webhook_receiver/main.py` was corrected so the full-repository syntax check can cover that module as well.

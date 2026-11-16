@@ -7,7 +7,7 @@ import pandas as pd
 from indicators import add_indicators, resample_ohlcv
 
 IST = ZoneInfo("Asia/Kolkata")
-BTST_START, BTST_END = time(15, 15), time(15, 29)
+BTST_START, BTST_END = time(15, 0), time(15, 29)
 MIN_QUALITY_SCORE = 70.0
 
 
@@ -55,7 +55,19 @@ def _intraday_checks(intraday: pd.DataFrame, side: str):
     body_pct = abs(float(last.close) - float(last.open)) / rng
     close_location = (float(last.close) - float(last.low)) / rng
     strong_candle = bool(body_pct >= 0.60 and (close_location >= 0.80 if side == "LONG" else close_location <= 0.20))
-    fifteen = add_indicators(resample_ohlcv(intraday, "15min"))
+    fifteen = resample_ohlcv(intraday, "15min")
+    # Resampling uses right-labelled candle-end timestamps. Keep only 15m bars
+    # whose close time is no later than the end of the latest completed base candle.
+    try:
+        steps = intraday.index.to_series().diff().dropna()
+        base_step = steps[steps <= pd.Timedelta(minutes=30)].median()
+        if pd.isna(base_step) or base_step <= pd.Timedelta(0):
+            base_step = pd.Timedelta(minutes=1)
+        completed_until = (intraday.index[-1] + base_step).floor("15min")
+        fifteen = fifteen.loc[fifteen.index <= completed_until]
+    except Exception:
+        fifteen = fifteen.iloc[:-1] if len(fifteen) else fifteen
+    fifteen = add_indicators(fifteen) if len(fifteen) else fifteen
     mtf = False
     if len(fifteen) >= 55:
         m = fifteen.iloc[-1]
@@ -123,10 +135,12 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
             close_location = (session_close - session_low) / day_range
             previous_close = float(daily.close.iloc[-1]) if len(daily) else 0.0
             day_return_pct = ((session_close / previous_close) - 1) * 100 if previous_close > 0 else 0.0
-            last_30 = session.tail(6)
-            prior_bars = session.iloc[:-6]
+            # Use an actual 30-minute time window, independent of the selected candle interval.
+            cutoff_30m = session.index[-1] - pd.Timedelta(minutes=30)
+            last_30 = session.loc[session.index > cutoff_30m]
+            prior_bars = session.loc[session.index <= cutoff_30m]
             last_30_volume = float(last_30.volume.sum())
-            typical_30_volume = float(prior_bars.volume.mean() * len(last_30)) if not prior_bars.empty else 0.0
+            typical_30_volume = float(prior_bars.volume.mean() * len(last_30)) if not prior_bars.empty and len(last_30) else 0.0
             late_volume_ratio = last_30_volume / typical_30_volume if typical_30_volume > 0 else 0.0
             vwap_extension_pct = abs((session_close / float(last.vwap) - 1) * 100) if pd.notna(last.vwap) and float(last.vwap) > 0 else 999.0
             btst_quality = {"Close location": round(close_location,3), "Day change %": round(day_return_pct,2),
@@ -151,6 +165,15 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
             aligned = sector_relative_strength > 0 if side == "LONG" else sector_relative_strength < 0
             if aligned:
                 score = min(100.0, score + 5.0)
+        # Rank otherwise-qualified stocks by relative strength of their evidence.
+        directional_close = checks["close_location"] if side == "LONG" else 1.0 - checks["close_location"]
+        volume_strength = min(max((float(last.volume_ratio) - 1.5) / 2.0, 0.0), 1.0)
+        breakout_level = float(last.breakout_level if side == "LONG" else last.breakdown_level)
+        breakout_margin_pct = abs(float(last.close) / breakout_level - 1.0) * 100 if breakout_level > 0 else 0.0
+        breakout_strength = min(breakout_margin_pct / 0.75, 1.0)
+        vwap_extension = abs(float(last.close) / float(last.vwap) - 1.0) if pd.notna(last.vwap) and float(last.vwap) > 0 else 1.0
+        vwap_strength = max(0.0, 1.0 - vwap_extension / 0.04)
+        rank_score = 35.0 * volume_strength + 20.0 * min(checks["body_pct"], 1.0) + 20.0 * directional_close + 15.0 * breakout_strength + 10.0 * vwap_strength
         atr_value = float(last.atr14)
         entry = float(last.close)
         if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(entry) or entry <= 0:
@@ -165,13 +188,13 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
             "symbol": symbol, "side": side, "strategy": strategy, "entry": entry,
             "stop_loss": stop, "target": target, "target1": entry+(risk if side=="LONG" else -risk),
             "target2": entry+(1.5*risk if side=="LONG" else -1.5*risk),
-            "target3": target, "risk_reward": reward/risk, "score": round(score,1),
+            "target3": target, "risk_reward": reward/risk, "score": round(score,1), "rank_score": round(rank_score,1),
             "score_label": "STRONG" if score >= 85 else "QUALIFIED",
             "reasons": reasons + f"; Candle body: {checks['body_pct']:.0%}; close location: {checks['close_location']:.0%}; relative volume: {float(last.volume_ratio):.2f}x", "atr": atr_value, "checks": checks, "btst_quality": btst_quality,
             "sector_relative_strength": sector_relative_strength,
             "signal_time": str(intraday.index[-1]),
         })
-    return max(candidates, key=lambda s: (s["score"], s["risk_reward"])) if candidates else None
+    return max(candidates, key=lambda s: (s.get("rank_score", 0), s["score"], s["risk_reward"])) if candidates else None
 
 
 def best_signal(candidates):
