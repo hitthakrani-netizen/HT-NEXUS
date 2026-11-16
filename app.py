@@ -82,7 +82,7 @@ with st.sidebar:
     lookback=st.slider("Intraday history (days)",7,90,30)
     daily_lookback=st.slider("Daily history (calendar days)",250,1500,500,step=50)
     capital=st.number_input("Backtest capital (₹)",min_value=10000,value=100000,step=10000)
-    risk=st.slider("Risk per trade (%)",0.25,2.0,1.0,step=0.25)/100
+    risk=st.slider("Risk per trade (%)",0.25,1.0,0.5,step=0.25)/100
     nifty_id=st.text_input("Dhan NIFTY 50 Index Security ID",value="13",help="Dhan instrument master મુજબ IDX_I / INDEX ID ચકાસો.")
     st.markdown("**NSE Stock F&O Universe**")
     st.caption("Dhanના current instrument master માંથી બધા NSE OPTSTK underlyings આપમેળે load થશે. Manual 10-stock limit નથી.")
