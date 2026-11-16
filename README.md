@@ -1,6 +1,6 @@
-# HT NEXUS PRO
+# HT NEXUS
 
-Read-only DhanHQ v2 NIFTY + NSE stock scanner with exactly two strategies:
+Read-only DhanHQ v2 NSE stock scanner with exactly two strategies:
 - **BTST:** signal generation restricted to 15:15–15:29 IST.
 - **SWING:** intended 1–3 trading-session holding window.
 
@@ -10,7 +10,7 @@ The app is a research/paper-trading scaffold. It does **not** place, modify, or 
 - `app.py` — responsive Streamlit dashboard, scan controls, one-best-signal view, backtest and paper journal.
 - `market_data.py` — DhanHQ v2 read-only REST adapter for quotes and historical candles.
 - `indicators.py` — EMA, RSI, MACD, VWAP, ATR, volume ratio and breakout levels.
-- `strategy_engine.py` — NIFTY market regime filter, relative-strength helper, multi-timeframe and false-breakout checks, risk levels.
+- `strategy_engine.py` — stock-only BTST/SWING confirmation engine, optional market context, multi-timeframe and false-breakout checks, risk levels.
 - `backtest.py` — basic OHLC backtest with conservative stop-first same-bar handling.
 - `README.md` — setup and validation.
 
@@ -47,7 +47,7 @@ Do not paste credentials into source code, screenshots, GitHub, or chat. Add `.s
 
 ## NIFTY + stock confirmation
 
-The scanner fetches NIFTY 50 daily and intraday candles using Dhan segment `IDX_I`, instrument `INDEX`, and the default security ID `13` (editable in the sidebar). It displays a separate NIFTY setup and uses the NIFTY daily regime as a directional filter for stock BTST/SWING candidates. Confirm the index security ID against the current Dhan instrument master if the API rejects it. This is the scanner's own Dhan-based technical confirmation; it does not ingest private/proprietary TradingView indicator alerts.
+NIFTY/index data may be displayed as optional market context and relative-strength reference only. It is never a mandatory filter, never replaces a stock candidate, and never creates a separate index trade signal. Stock BTST/SWING eligibility is decided from the stock's own candles and confirmations. Confirm any configured index instrument ID against the current Dhan instrument master.
 
 ## Universe and instrument IDs
 The sidebar accepts one row per stock:
