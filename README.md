@@ -125,3 +125,7 @@ NIFTY 50 default Dhan ID 13 in segment IDX_I is supported by Dhan instrument ref
 The single stock scan automatically requests the selected stock's active F&O expiry and option chain from DhanHQ using the NSE_FNO underlying segment. A LONG stock signal maps to CE/CALL; a SHORT stock signal maps to PE/PUT. The app filters for live bid/ask depth, volume, open interest, spread and delta, then displays indicative buy (ask), premium stop, Target 1 and Target 2 in the same scan result. There is no separate stock selector or CE/PE scan button. If the stock has no active F&O contracts or no liquid matching contract passes, it displays no option trade rather than forcing a recommendation.
 
 The dashboard includes a mobile-responsive visual layout. On Android Chrome, use the browser menu and choose **Add to Home screen** (or **Install app**, if offered) to create a home-screen shortcut. This remains a Streamlit web app, not a native APK. Option-chain values and formula-based targets are indicative, not guaranteed fills or tested profit forecasts. No orders are placed.
+
+
+## Automated code validation
+The pull request includes GitHub Actions checks for Python syntax and the repository's existing unit tests. A pre-existing literal-newline syntax error in `webhook_receiver/main.py` was corrected so the full-repository syntax check can cover that module as well.
