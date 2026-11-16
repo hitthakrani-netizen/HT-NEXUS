@@ -165,7 +165,7 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
     try:
         client=_dhan_client()
         signals=[]; diagnostics=[]; progress=st.progress(0)
-        with st.spinner("Scanning NSE stocks independently; NIFTY is context only..."):
+        with st.spinner("One pass: scanning NSE stocks, checking BTST confirmation and auto-matching CALL/PUT..."):
             end=datetime.now(IST).replace(tzinfo=None)
             # Stock-only scan: skip index requests so they cannot delay or filter stock candidates.
             nifty_daily = pd.DataFrame()
@@ -408,31 +408,6 @@ if st.session_state.get("nse_market_snapshot") is not None:
             for section, error in errs.items():
                 st.warning(f"{section}: {error}")
 st.caption("NSE market data may be delayed, rate-limited or changed by NSE. OI/volume/turnover do not identify buyer vs seller by themselves. Cross-check with Dhan live option chain before a trade.")
-
-st.divider()
-st.subheader("📊 AUTOMATIC STOCK OPTION RESULT")
-st.caption("આ વિભાગ ઉપરના ONE-CLICK SCAN માંથી જ data બતાવે છે. અહીં અલગ stock selection કે CE/PE scan button નથી.")
-auto_option = st.session_state.get("stock_option_result")
-if isinstance(auto_option, dict):
-    st.metric(f"{auto_option['symbol']} Spot", f"₹{auto_option['spot']:.2f}")
-    st.caption(f"Expiry: {auto_option['expiry']} • Stock direction: {auto_option['bias'] or 'No confirmed stock signal'}")
-    flow_cols = st.columns(2)
-    with flow_cols[0]:
-        st.metric("CALL / CE premium change", f"{auto_option['call_flow']['premium_change']:+.2f}%")
-        st.caption(f"OI change: {auto_option['call_flow']['oi_change']:,} • Volume: {auto_option['call_flow']['volume']:,}")
-    with flow_cols[1]:
-        st.metric("PUT / PE premium change", f"{auto_option['put_flow']['premium_change']:+.2f}%")
-        st.caption(f"OI change: {auto_option['put_flow']['oi_change']:,} • Volume: {auto_option['put_flow']['volume']:,}")
-    if auto_option.get("best"):
-        contract = auto_option["best"]
-        st.success(f"RECOMMENDED {contract['Type']} — {auto_option['symbol']} {contract['Strike']} • Expiry {contract['Expiry']} • LTP ₹{contract['LTP']:.2f} • Buy Ask ₹{contract['BUY (Ask)']:.2f}")
-        st.caption(f"Premium SL ₹{contract['SL']:.2f} • Target 1 ₹{contract['Target 1']:.2f} • Target 2 ₹{contract['Target 2']:.2f} • Spread {contract['Spread %']:.2f}% • OI {contract['OI']:,} • Volume {contract['Volume']:,} • Delta {contract['Delta']:.3f}")
-    else:
-        st.warning("Stock setup passed, but its matching CALL/PUT did not pass liquidity filters. No option trade.")
-elif st.session_state.get("stock_option_error"):
-    st.warning("Automatic option-chain check failed: " + str(st.session_state["stock_option_error"]))
-else:
-    st.caption("એક જ ONE-CLICK SCAN ચલાવો; qualified stock મળશે તો તેનું matching CALL/PUT અહીં આપમેળે દેખાશે.")
 
 with st.expander("Historical Backtesting"):
     st.caption("Single-stock historical test; historical performance does not guarantee future results.")
