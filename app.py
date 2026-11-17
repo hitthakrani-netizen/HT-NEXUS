@@ -271,14 +271,19 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                     if sig:
                         nse_check = confirm_stock_with_nse(nse_snapshot, item["symbol"], sig["side"])
                         sig["nse_confirmation"] = nse_check
-                        if not nse_check.get("available") or not nse_check.get("aligned"):
-                            diagnostic["Status"] = "Rejected: NSE stock confirmation — " + nse_check.get("reason", "NSE confirmation failed.")
+                        # NSE public website feeds are supplementary corroboration, not a
+                        # hard dependency. Dhan candles remain the primary live stock data.
+                        # Reject only when usable NSE evidence explicitly contradicts direction
+                        # or shows non-positive OI on a matched OI-spurt row.
+                        if nse_check.get("conflict"):
+                            diagnostic["Status"] = "Rejected: NSE evidence conflicts — " + nse_check.get("reason", "NSE evidence conflicts with Dhan.")
                             sig = None
                         else:
-                            bonus = float(nse_check.get("score_bonus", 0) or 0)
+                            bonus = float(nse_check.get("score_bonus", 0) or 0) if nse_check.get("aligned") else 0.0
                             sig["score"] = min(100.0, float(sig.get("score", 0)) + bonus)
                             sig["rank_score"] = min(100.0, float(sig.get("rank_score", 0)) + bonus)
-                            sig["reasons"] += "; NSE confirmation: " + nse_check.get("reason", "")
+                            label = "NSE confirmation" if nse_check.get("aligned") else "NSE corroboration unavailable/insufficient; Dhan technical checks used"
+                            sig["reasons"] += "; " + label + ": " + nse_check.get("reason", "")
                     if sig and tv_screener is not None:
                         tv_check = confirm_with_tradingview(sig, tv_screener)
                         sig["tradingview_confirmation"] = tv_check
@@ -378,7 +383,7 @@ if "stock_signals" in st.session_state and st.session_state.get("stock_signals_s
     if signals:
         phase = st.session_state.get("btst_phase_status", "NORMAL")
         if strategy == "BTST" and phase == "CONFIRMED":
-            st.info("BTST stock setup passed the 3:00–3:14 shortlist and fresh 3:15+ confirmation; NSE and option checks are also required below.")
+            st.info("BTST stock setup passed the 3:00–3:14 shortlist and fresh 3:15+ confirmation; Dhan option validation is required. NSE public data is supplementary corroboration when available.")
         # Keep exactly one highest-scoring qualifying stock; never mix weaker signals.
         best=max(signals,key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
         df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target 1":round(best.get("target1",best["target"]),2),"Target 2":round(best.get("target2",best["target"]),2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Rank Score":best.get("rank_score",0),"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
@@ -386,10 +391,12 @@ if "stock_signals" in st.session_state and st.session_state.get("stock_signals_s
         st.write(best["reasons"])
         nsec = best.get("nse_confirmation", {})
         if nsec.get("aligned"):
-            st.success("NSE stock confirmation: PASS • " + ", ".join(nsec.get("evidence", [])))
+            st.success("NSE stock corroboration: PASS • " + ", ".join(nsec.get("evidence", [])))
             st.caption(nsec.get("reason", ""))
+        elif nsec.get("conflict"):
+            st.error("NSE data conflicts with the Dhan stock direction. Candidate rejected. " + nsec.get("reason", ""))
         else:
-            st.error("NSE stock confirmation was not passed; no final trade is permitted.")
+            st.info("NSE public snapshot was unavailable or did not independently match this stock. Dhan candle checks remain primary; no NSE bonus was added. " + nsec.get("reason", ""))
         tvc = best.get("tradingview_confirmation", {})
         if tvc.get("matched") and tvc.get("aligned"):
             st.success(f"TradingView confirmation: PASS • {tvc.get('score',0)}/100")
@@ -428,8 +435,6 @@ if "stock_signals" in st.session_state and st.session_state.get("stock_signals_s
         all_insufficient = bool(diagnostics) and all(str(d.get("Status", "")).startswith("Insufficient history") for d in diagnostics)
         if all_data_failed:
             st.error("DATA ERROR — Dhan rejected the market-data requests for every stock. No strategy confirmation was possible. This is NOT a genuine NO TRADE result. Check the full per-stock error below before relying on this scan.")
-        elif not st.session_state.get("nse_scan_available", False):
-            st.error("NSE DATA UNAVAILABLE — fewer than two independent NSE stock feeds returned usable rows. No final trade is issued; this is not a genuine NO TRADE result.")
         elif all_insufficient:
             st.warning("INSUFFICIENT DATA — one or more required candle histories are missing for every scanned stock. This is NOT a genuine NO TRADE result. Check the candle counts below.")
         else:
