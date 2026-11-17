@@ -10,6 +10,24 @@ from datetime import datetime
 from typing import Any
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+def _retrying_session(session: requests.Session | None = None) -> requests.Session:
+    """Retry temporary NSE DNS/connection failures and HTTP throttling."""
+    if session is not None:
+        return session
+    result = requests.Session()
+    retry = Retry(
+        total=3, connect=3, read=2, status=2, backoff_factor=0.6,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(("GET",)),
+        respect_retry_after_header=True,
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=4, pool_maxsize=4)
+    result.mount("https://", adapter)
+    result.mount("http://", adapter)
+    return result
 
 BASE = "https://www.nseindia.com"
 ENDPOINTS = {
@@ -31,7 +49,7 @@ class NSEMarketData:
 
     def __init__(self, timeout: int = 15, session: requests.Session | None = None):
         self.timeout = timeout
-        self.session = session or requests.Session()
+        self.session = _retrying_session(session)
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36",
             "Accept": "application/json, text/plain, */*",
