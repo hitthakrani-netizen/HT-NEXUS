@@ -10,7 +10,7 @@ from strategy_engine import evaluate_symbol
 from nse_confirmation import confirm_stock_with_nse
 from backtest import run_backtest
 from stock_options import scan_stock_option_chain
-from nse_market_data import NSEMarketData, NSEDataError
+from nse_market_data import NSEMarketData
 from tradingview_screener import parse_tradingview_csv, confirm_with_tradingview
 from fno_universe import load_nse_stock_fno_universe, UniverseError
 
