@@ -245,6 +245,7 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                                 strategy="BTST", sector_relative_strength=None, enforce_btst_window=False
                             )
                         if not pre_sig or not sig or pre_sig["side"] != sig["side"]:
+                            diagnostic["Status"] = "Rejected: BTST 3:00–3:14 shortlist and completed 3:15+ stock confirmation did not both pass in the same direction."
                             sig = None
                         else:
                             try:
@@ -287,6 +288,12 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                         else:
                             sig["score"] = min(100.0, float(sig.get("score",0)) + 5.0)
                             sig["reasons"] += "; TradingView: " + tv_check.get("reason","")
+                    if sig is None and diagnostic["Status"] == "Data OK":
+                        diagnostic["Status"] = (
+                            "No setup: one or more strict stock checks failed "
+                            "(daily trend/RSI, intraday EMA, RSI+MACD, VWAP, 1.5x volume, "
+                            "strong candle, breakout, 15m confirmation, BTST closing quality or score >=85)."
+                        )
                     if sig:
                         sig["sector"] = item["sector"]
                         if tv_screener is None:
