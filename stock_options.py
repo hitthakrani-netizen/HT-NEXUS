@@ -8,7 +8,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def scan_stock_option_chain(client, symbol, security_id, bias=None):
     """Return liquid CE/PE candidates and transparent premium risk levels."""
-    expiries = client.option_expiries(security_id, "NSE_FNO")
+    expiries = client.option_expiries(security_id, "NSE_EQ")
     today = datetime.now(IST).date()
     valid = []
     for value in expiries:
@@ -24,7 +24,7 @@ def scan_stock_option_chain(client, symbol, security_id, bias=None):
     # Dhan Option Chain endpoint is limited to one request per 3 seconds.
     # Expiry-list lookup is performed immediately before this; leave a safe gap.
     time.sleep(3.05)
-    chain = client.option_chain(security_id, expiry, "NSE_FNO")
+    chain = client.option_chain(security_id, expiry, "NSE_EQ")
     data = chain.get("data", {}) if isinstance(chain, dict) else {}
     spot = float(data.get("last_price", 0) or 0)
     oc = data.get("oc", {})
