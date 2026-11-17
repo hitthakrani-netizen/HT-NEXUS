@@ -6,6 +6,22 @@ import re
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+def _retrying_session() -> requests.Session:
+    """Retry transient DNS, connection, and throttling failures downloading Dhan's master."""
+    session = requests.Session()
+    retry = Retry(
+        total=4, connect=4, read=2, status=2, backoff_factor=0.75,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(("GET",)),
+        respect_retry_after_header=True,
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=2, pool_maxsize=2)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
 
@@ -44,7 +60,7 @@ def load_nse_stock_fno_universe(timeout: int = 30) -> list[dict]:
     where Dhan has not populated the underlying ID. No fixed/partial stock list is used.
     """
     try:
-        response = requests.get(
+        response = _retrying_session().get(
             MASTER_URL,
             headers={"User-Agent": "HT-NEXUS/1.0", "Accept": "text/csv,*/*"},
             timeout=timeout,
