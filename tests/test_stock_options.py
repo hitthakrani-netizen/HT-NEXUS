@@ -82,7 +82,7 @@ def test_btst_skips_expiry_today(monkeypatch):
     today = datetime.now(IST).date()
     client = FakeDhan(
         {"data": {"last_price": 1000, "oc": {"1000": {"ce": _leg(), "pe": _leg(-0.55)}}}},
-        expiries=[today.isoformat(), (today + timedelta(days=7)).isoformat()],
+        expiries=[today.isoformat(), (today + timedelta(days=1)).isoformat(), (today + timedelta(days=7)).isoformat()],
     )
     result = scan_stock_option_chain(client, "RELIANCE", 2885, "LONG", strategy="BTST")
     assert result["expiry"] == (today + timedelta(days=7)).isoformat()
