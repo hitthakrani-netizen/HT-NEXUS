@@ -98,11 +98,11 @@ def _oi_change(row: dict | None) -> float | None:
 
 
 def confirm_stock_with_nse(snapshot: dict, symbol: str, side: str) -> dict:
-    """Require two independent NSE stock feeds and directional price agreement.
+    """Use NSE public feeds as supplementary corroboration for a Dhan signal.
 
-    A positive OI change is treated only as fresh positioning; direction is
-    taken from the stock price-change fields and must agree with the Dhan
-    candle signal. OI alone never identifies buyer versus seller.
+    Missing/partial NSE snapshots are neutral, not a hard scan failure.
+    Explicitly contradictory price direction or non-positive matched OI is a
+    conflict. Positive OI is positioning evidence, not proof of buyer/seller.
     """
     side = str(side).upper()
     if side not in {"LONG", "SHORT"}:
@@ -157,7 +157,7 @@ def confirm_stock_with_nse(snapshot: dict, symbol: str, side: str) -> dict:
     if not price_changes:
         return {
             "available": True, "matched": True, "aligned": False,
-            "score_bonus": 0, "conflict": False,
+            "score_bonus": 0, "conflict": bool(oi_conflict),
             "reason": "NSE matched the stock but returned no usable price-change direction.",
             "evidence": evidence,
             "oi_change": oi_delta,
