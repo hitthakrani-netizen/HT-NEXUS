@@ -13,6 +13,28 @@ from typing import Any, Iterable, Optional
 import pandas as pd
 import requests
 import pyotp
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+def _retrying_session(session: Optional[requests.Session] = None) -> requests.Session:
+    """Use bounded retries for transient DNS, connection, and provider throttling errors.
+
+    Dhan chart/option endpoints are read-only POST requests, so retrying them is safe.
+    Persistent DNS failures still require the hosting/network DNS resolver to recover.
+    """
+    if session is not None:
+        return session
+    result = requests.Session()
+    retry = Retry(
+        total=3, connect=3, read=2, status=2, backoff_factor=0.6,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(("GET", "POST")),
+        respect_retry_after_header=True,
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=8, pool_maxsize=8)
+    result.mount("https://", adapter)
+    result.mount("http://", adapter)
+    return result
 
 BASE_URL = "https://api.dhan.co/v2"
 IST = "Asia/Kolkata"
@@ -71,7 +93,7 @@ def generate_access_token(client_id: str, pin: str, totp_secret: str, timeout: i
 
     def request_token(code: str):
         try:
-            response = requests.post(
+            response = _retrying_session().post(
                 "https://auth.dhan.co/app/generateAccessToken",
                 params={"dhanClientId": str(client_id).strip(), "pin": str(pin).strip(), "totp": code},
                 headers={"Accept": "application/json"}, timeout=timeout,
@@ -191,7 +213,7 @@ class DhanDataClient:
         self.client_id, self.access_token = _credentials_from_sources(client_id, access_token)
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = session or requests.Session()
+        self.session = _retrying_session(session)
         self.quote_pause = max(0.0, float(quote_pause))
         self.session.headers.update({
             "Accept": "application/json",
@@ -346,7 +368,7 @@ class DhanDataClient:
         return self._chart_request("/charts/historical", payload)
 
 
-    def option_expiries(self, underlying_security_id, underlying_segment="NSE_FNO") -> list[str]:
+    def option_expiries(self, underlying_security_id, underlying_segment="NSE_EQ") -> list[str]:
         """Fetch active option expiries for an F&O underlying."""
         payload = {"UnderlyingScrip": int(underlying_security_id), "UnderlyingSeg": underlying_segment}
         body = self._post("/optionchain/expirylist", payload)
@@ -355,7 +377,7 @@ class DhanDataClient:
             raise DhanAPIError(f"Unexpected option expiry response: {body}")
         return [str(x) for x in data]
 
-    def option_chain(self, underlying_security_id, expiry, underlying_segment="NSE_FNO") -> dict:
+    def option_chain(self, underlying_security_id, expiry, underlying_segment="NSE_EQ") -> dict:
         """Fetch live option chain; Dhan rate limit is one unique request per 3 seconds."""
         payload = {
             "UnderlyingScrip": int(underlying_security_id),

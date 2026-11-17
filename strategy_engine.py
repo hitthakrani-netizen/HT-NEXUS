@@ -7,7 +7,7 @@ import pandas as pd
 from indicators import add_indicators, resample_ohlcv
 
 IST = ZoneInfo("Asia/Kolkata")
-BTST_START, BTST_END = time(15, 0), time(15, 29)
+BTST_START, BTST_END = time(15, 16), time(15, 29)
 MIN_QUALITY_SCORE = 70.0
 
 
