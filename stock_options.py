@@ -13,10 +13,10 @@ def scan_stock_option_chain(client, symbol, security_id, bias=None, strategy="BT
         raise ValueError("Only BTST and SWING option validation is supported.")
     expiries = client.option_expiries(security_id, "NSE_EQ")
     today = datetime.now(IST).date()
-    # Never select an option expiring today for an overnight BTST position.
+    # Never select an option expiring today or on the next calendar day for an overnight BTST position.
     # A Swing setup can remain open for up to three trading sessions, so keep
     # at least six calendar days to expiry; if none exists, do not force a contract.
-    minimum_expiry = today + timedelta(days=1 if strategy == "BTST" else 6)
+    minimum_expiry = today + timedelta(days=2 if strategy == "BTST" else 6)
     valid = []
     for value in expiries:
         try:
