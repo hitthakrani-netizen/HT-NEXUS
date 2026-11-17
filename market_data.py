@@ -13,6 +13,28 @@ from typing import Any, Iterable, Optional
 import pandas as pd
 import requests
 import pyotp
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+def _retrying_session(session: Optional[requests.Session] = None) -> requests.Session:
+    """Use bounded retries for transient DNS, connection, and provider throttling errors.
+
+    Dhan chart/option endpoints are read-only POST requests, so retrying them is safe.
+    Persistent DNS failures still require the hosting/network DNS resolver to recover.
+    """
+    if session is not None:
+        return session
+    result = requests.Session()
+    retry = Retry(
+        total=3, connect=3, read=2, status=2, backoff_factor=0.6,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(("GET", "POST")),
+        respect_retry_after_header=True,
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=8, pool_maxsize=8)
+    result.mount("https://", adapter)
+    result.mount("http://", adapter)
+    return result
 
 BASE_URL = "https://api.dhan.co/v2"
 IST = "Asia/Kolkata"
@@ -191,7 +213,7 @@ class DhanDataClient:
         self.client_id, self.access_token = _credentials_from_sources(client_id, access_token)
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = session or requests.Session()
+        self.session = _retrying_session(session)
         self.quote_pause = max(0.0, float(quote_pause))
         self.session.headers.update({
             "Accept": "application/json",
