@@ -25,14 +25,15 @@ def _leg(delta=0.55):
 
 
 class FakeDhan:
-    def __init__(self, chain):
+    def __init__(self, chain, expiries=None):
         self.chain = chain
+        self.expiries = expiries
         self.expiry_calls = []
         self.chain_calls = []
 
     def option_expiries(self, security_id, segment):
         self.expiry_calls.append((security_id, segment))
-        return [(datetime.now(IST).date() + timedelta(days=7)).isoformat()]
+        return self.expiries or [(datetime.now(IST).date() + timedelta(days=7)).isoformat()]
 
     def option_chain(self, security_id, expiry, segment):
         self.chain_calls.append((security_id, expiry, segment))
@@ -73,3 +74,43 @@ def test_stock_option_chain_returns_no_best_when_liquidity_fails(monkeypatch):
     }}})
     result = scan_stock_option_chain(client, "RELIANCE", 2885, "LONG")
     assert result["best"] is None
+
+
+
+def test_btst_skips_expiry_today(monkeypatch):
+    monkeypatch.setattr("stock_options.time.sleep", lambda _: None)
+    today = datetime.now(IST).date()
+    client = FakeDhan(
+        {"data": {"last_price": 1000, "oc": {"1000": {"ce": _leg(), "pe": _leg(-0.55)}}}},
+        expiries=[today.isoformat(), (today + timedelta(days=7)).isoformat()],
+    )
+    result = scan_stock_option_chain(client, "RELIANCE", 2885, "LONG", strategy="BTST")
+    assert result["expiry"] == (today + timedelta(days=7)).isoformat()
+    assert client.chain_calls[0][1] == result["expiry"]
+
+
+def test_swing_skips_expiry_inside_three_session_buffer(monkeypatch):
+    monkeypatch.setattr("stock_options.time.sleep", lambda _: None)
+    today = datetime.now(IST).date()
+    client = FakeDhan(
+        {"data": {"last_price": 1000, "oc": {"1000": {"ce": _leg(), "pe": _leg(-0.55)}}}},
+        expiries=[
+            (today + timedelta(days=3)).isoformat(),
+            (today + timedelta(days=7)).isoformat(),
+        ],
+    )
+    result = scan_stock_option_chain(client, "RELIANCE", 2885, "LONG", strategy="SWING")
+    assert result["expiry"] == (today + timedelta(days=7)).isoformat()
+
+
+def test_swing_refuses_near_expiry_when_no_safe_contract_exists():
+    today = datetime.now(IST).date()
+    client = FakeDhan(
+        {"data": {"last_price": 1000, "oc": {"1000": {"ce": _leg(), "pe": _leg(-0.55)}}}},
+        expiries=[(today + timedelta(days=2)).isoformat()],
+    )
+    try:
+        scan_stock_option_chain(client, "RELIANCE", 2885, "LONG", strategy="SWING")
+        assert False, "expected no safe expiry"
+    except ValueError as exc:
+        assert "no stock-option expiry remains" in str(exc)
