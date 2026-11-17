@@ -117,11 +117,11 @@ def confirm_stock_with_nse(snapshot: dict, symbol: str, side: str) -> dict:
     oi_frame = snapshot.get("OI Spurts")
     frames = (active_frame, volume_frame, oi_frame)
     available_sources = sum(bool(_rows(frame)) for frame in frames)
-    if available_sources < 2:
+    if available_sources == 0:
         return {
             "available": False, "matched": False, "aligned": False,
             "score_bonus": 0, "conflict": False,
-            "reason": f"Only {available_sources}/3 NSE stock feeds returned usable rows; public NSE corroboration is unavailable.",
+            "reason": f"No NSE stock feeds returned usable rows; public NSE corroboration is unavailable.",
             "evidence": [],
         }
 
