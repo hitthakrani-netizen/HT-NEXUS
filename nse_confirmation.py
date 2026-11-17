@@ -28,7 +28,14 @@ OI_PREVIOUS_KEYS = ("prevoi", "previousoi", "previous_oi", "prev_oi")
 
 
 def _normalise_symbol(value: Any) -> str:
-    text = str(value or "").strip().upper()
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip().upper()
     text = re.sub(r"^(NSE:)", "", text)
     text = re.sub(r"[-_ ]EQ$", "", text)
     return text
