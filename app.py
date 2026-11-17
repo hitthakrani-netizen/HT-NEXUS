@@ -353,7 +353,7 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
             underlying = next((x for x in universe if x["symbol"] == strongest["symbol"]), None)
             if underlying:
                 try:
-                    st.session_state["stock_option_result"] = scan_stock_option_chain(client,strongest["symbol"],underlying.get("fno_security_id",underlying["security_id"]),strongest["side"])
+                    st.session_state["stock_option_result"] = scan_stock_option_chain(client,strongest["symbol"],underlying.get("fno_security_id",underlying["security_id"]),strongest["side"],strategy=strategy)
                 except Exception as option_exc:
                     st.session_state["stock_option_error"] = str(option_exc)
         else:
