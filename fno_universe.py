@@ -158,7 +158,7 @@ def load_nse_stock_fno_universe(timeout: int = 30) -> list[dict]:
         matched[symbol] = {
             "symbol": symbol,
             "security_id": cash_id,
-            "fno_security_id": underlying_id or cash_id,
+            "fno_security_id": cash_id,
             "sector": "UNKNOWN",
             "option_contract_count": contract_counts.get(underlying_id, 0) if underlying_id else symbol_counts.get(underlying_symbol, 0),
         }
