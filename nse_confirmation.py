@@ -98,17 +98,17 @@ def _oi_change(row: dict | None) -> float | None:
 
 
 def confirm_stock_with_nse(snapshot: dict, symbol: str, side: str) -> dict:
-    """Require two independent NSE stock feeds and directional price agreement.
+    """Use NSE public feeds as supplementary corroboration for a Dhan signal.
 
-    A positive OI change is treated only as fresh positioning; direction is
-    taken from the stock price-change fields and must agree with the Dhan
-    candle signal. OI alone never identifies buyer versus seller.
+    Missing/partial NSE snapshots are neutral, not a hard scan failure.
+    Explicitly contradictory price direction or non-positive matched OI is a
+    conflict. Positive OI is positioning evidence, not proof of buyer/seller.
     """
     side = str(side).upper()
     if side not in {"LONG", "SHORT"}:
         return {
             "available": False, "matched": False, "aligned": False,
-            "score_bonus": 0, "reason": "Unsupported stock direction.",
+            "score_bonus": 0, "conflict": True, "reason": "Unsupported stock direction.",
             "evidence": [],
         }
 
@@ -117,11 +117,11 @@ def confirm_stock_with_nse(snapshot: dict, symbol: str, side: str) -> dict:
     oi_frame = snapshot.get("OI Spurts")
     frames = (active_frame, volume_frame, oi_frame)
     available_sources = sum(bool(_rows(frame)) for frame in frames)
-    if available_sources < 2:
+    if available_sources == 0:
         return {
             "available": False, "matched": False, "aligned": False,
-            "score_bonus": 0,
-            "reason": f"Only {available_sources}/3 NSE stock feeds returned usable rows; at least two are required.",
+            "score_bonus": 0, "conflict": False,
+            "reason": f"No NSE stock feeds returned usable rows; public NSE corroboration is unavailable.",
             "evidence": [],
         }
 
@@ -142,8 +142,8 @@ def confirm_stock_with_nse(snapshot: dict, symbol: str, side: str) -> dict:
     if not evidence and oi_row is None:
         return {
             "available": True, "matched": False, "aligned": False,
-            "score_bonus": 0,
-            "reason": f"{symbol} did not appear in NSE stock activity, volume-gainer or OI-spurt feeds.",
+            "score_bonus": 0, "conflict": False,
+            "reason": f"{symbol} did not appear in the available NSE stock activity, volume-gainer or OI-spurt feeds.",
             "evidence": [],
         }
 
@@ -157,7 +157,7 @@ def confirm_stock_with_nse(snapshot: dict, symbol: str, side: str) -> dict:
     if not price_changes:
         return {
             "available": True, "matched": True, "aligned": False,
-            "score_bonus": 0,
+            "score_bonus": 0, "conflict": bool(oi_conflict),
             "reason": "NSE matched the stock but returned no usable price-change direction.",
             "evidence": evidence,
             "oi_change": oi_delta,
@@ -174,10 +174,14 @@ def confirm_stock_with_nse(snapshot: dict, symbol: str, side: str) -> dict:
     else:
         reason = "NSE stock activity, volume/OI evidence and price direction agree with the Dhan stock signal."
 
+    conflict = bool(oi_conflict or (price_changes and not price_aligned))
+    # Two matching evidence categories are needed for a positive NSE bonus.
+    # A missing/partial public snapshot is neutral; explicit contradictory data is not.
     aligned = bool(price_aligned and len(evidence) >= 2 and not oi_conflict)
     bonus = min(10.0, 2.0 * len(evidence) + 2.0) if aligned else 0.0
     return {
         "available": True,
+        "conflict": conflict,
         "matched": bool(active_row is not None or volume_row is not None or oi_row is not None),
         "aligned": aligned,
         "score_bonus": bonus,

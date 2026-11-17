@@ -38,15 +38,17 @@ def test_nse_rejects_price_direction_conflict():
     assert result["score_bonus"] == 0
 
 
-def test_nse_requires_two_usable_independent_feeds():
+def test_partial_nse_feed_is_neutral_not_a_scan_blocker():
     snapshot = {
         "Most Active Underlying": [{"symbol": "SBIN", "pChange": 1.0}],
         "Volume Gainers": pd.DataFrame(),
         "OI Spurts": None,
     }
     result = confirm_stock_with_nse(snapshot, "SBIN", "LONG")
-    assert result["available"] is False
+    assert result["available"] is True
     assert result["aligned"] is False
+    assert result["conflict"] is False
+    assert result["score_bonus"] == 0
 
 
 def test_nse_rejects_oi_unwinding_when_oi_row_is_present():
@@ -58,3 +60,28 @@ def test_nse_rejects_oi_unwinding_when_oi_row_is_present():
     result = confirm_stock_with_nse(snapshot, "ICICIBANK", "LONG")
     assert result["aligned"] is False
     assert "non-positive OI" in result["reason"]
+
+
+
+def test_no_nse_feeds_is_neutral_and_does_not_block_dhan():
+    result = confirm_stock_with_nse(
+        {"Most Active Underlying": None, "Volume Gainers": pd.DataFrame(), "OI Spurts": None},
+        "SBIN",
+        "LONG",
+    )
+    assert result["available"] is False
+    assert result["aligned"] is False
+    assert result["conflict"] is False
+    assert result["score_bonus"] == 0
+
+
+def test_partial_nse_feed_with_opposite_price_direction_is_a_conflict():
+    result = confirm_stock_with_nse(
+        {"Most Active Underlying": [{"symbol": "SBIN", "pChange": -1.1}],
+         "Volume Gainers": None, "OI Spurts": None},
+        "SBIN",
+        "LONG",
+    )
+    assert result["conflict"] is True
+    assert result["aligned"] is False
+    assert result["score_bonus"] == 0
