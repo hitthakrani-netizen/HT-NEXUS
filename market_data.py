@@ -93,7 +93,7 @@ def generate_access_token(client_id: str, pin: str, totp_secret: str, timeout: i
 
     def request_token(code: str):
         try:
-            response = requests.post(
+            response = _retrying_session().post(
                 "https://auth.dhan.co/app/generateAccessToken",
                 params={"dhanClientId": str(client_id).strip(), "pin": str(pin).strip(), "totp": code},
                 headers={"Accept": "application/json"}, timeout=timeout,
@@ -368,7 +368,7 @@ class DhanDataClient:
         return self._chart_request("/charts/historical", payload)
 
 
-    def option_expiries(self, underlying_security_id, underlying_segment="NSE_FNO") -> list[str]:
+    def option_expiries(self, underlying_security_id, underlying_segment="NSE_EQ") -> list[str]:
         """Fetch active option expiries for an F&O underlying."""
         payload = {"UnderlyingScrip": int(underlying_security_id), "UnderlyingSeg": underlying_segment}
         body = self._post("/optionchain/expirylist", payload)
@@ -377,7 +377,7 @@ class DhanDataClient:
             raise DhanAPIError(f"Unexpected option expiry response: {body}")
         return [str(x) for x in data]
 
-    def option_chain(self, underlying_security_id, expiry, underlying_segment="NSE_FNO") -> dict:
+    def option_chain(self, underlying_security_id, expiry, underlying_segment="NSE_EQ") -> dict:
         """Fetch live option chain; Dhan rate limit is one unique request per 3 seconds."""
         payload = {
             "UnderlyingScrip": int(underlying_security_id),
