@@ -29,7 +29,7 @@ def _retrying_session(session: requests.Session | None = None) -> requests.Sessi
     result.mount("http://", adapter)
     return result
 
-BASE = "https://www.nseindia.com"
+BASE = "https://www.nseindia.in"
 ENDPOINTS = {
     "most_active_contracts": "/api/live-analysis-most-active-contracts",
     "most_active_underlying": "/api/live-analysis-most-active-underlyings",
