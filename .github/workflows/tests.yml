@@ -34,6 +34,6 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
       - name: Compile application modules
-        run: python -m compileall -q app.py backtest.py indicators.py market_data.py strategy_engine.py
+        run: python -m compileall -q app.py backtest.py indicators.py market_data.py strategy_engine.py nse_confirmation.py
       - name: Run unit tests
         run: python -m pytest -q
