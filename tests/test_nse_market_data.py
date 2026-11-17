@@ -23,9 +23,9 @@ class FakeSession:
         self.calls.append((url, params, timeout))
         if "/market-data/most-active-contracts" in url:
             return FakeResponse({"page": "primed"})
-        if url.endswith("/api/live-analysis-most-active-underlyings"):
+        if url.endswith("/api/live-analysis-most-active-underlying"):
             return FakeResponse({"data": [{"symbol": "RELIANCE", "pChange": 1.2}]})
-        if url.endswith("/api/live-analysis-oi-spurts"):
+        if url.endswith("/api/live-analysis-oi-spurts-underlyings"):
             return FakeResponse({"data": [{"symbol": "RELIANCE", "changeInOI": 12000}]})
         return FakeResponse({"data": []})
 
