@@ -1,4 +1,4 @@
-"""NSE stock-only BTST/SWING signal engine. NIFTY is context only; no orders are placed."""
+"""Stock-only BTST/SWING signal engine; no index regime filter or order placement."""
 from __future__ import annotations
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
@@ -8,29 +8,7 @@ from indicators import add_indicators, resample_ohlcv
 
 IST = ZoneInfo("Asia/Kolkata")
 BTST_START, BTST_END = time(15, 16), time(15, 29)
-MIN_QUALITY_SCORE = 70.0
-
-
-def market_regime(nifty_daily: pd.DataFrame) -> dict:
-    try:
-        x = add_indicators(nifty_daily)
-        if len(x) < 205:
-            return {"regime": "NEUTRAL", "reason": "Insufficient NIFTY history."}
-        z = x.iloc[-1]
-        if z.close > z.ema20 > z.ema50 > z.ema200:
-            return {"regime": "BULLISH", "reason": "NIFTY daily trend bullish."}
-        if z.close < z.ema20 < z.ema50 < z.ema200:
-            return {"regime": "BEARISH", "reason": "NIFTY daily trend bearish."}
-        return {"regime": "NEUTRAL", "reason": "NIFTY trend mixed."}
-    except Exception as exc:
-        return {"regime": "NEUTRAL", "reason": f"Regime unavailable: {exc}"}
-
-
-def relative_strength(stock_daily: pd.DataFrame, benchmark_daily: pd.DataFrame, lookback: int = 20):
-    if len(stock_daily) <= lookback or len(benchmark_daily) <= lookback:
-        return None
-    s, b = stock_daily.close.dropna(), benchmark_daily.close.dropna()
-    return float(s.iloc[-1] / s.iloc[-lookback-1] - b.iloc[-1] / b.iloc[-lookback-1])
+MIN_QUALITY_SCORE = 85.0
 
 
 def _intraday_checks(intraday: pd.DataFrame, side: str):
@@ -159,7 +137,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
                 if weakness_location < .50 or vwap_extension_pct > 4.0:
                     continue
         score = min(100.0, score)
-        if score < 85.0 or confirmations < len(required_checks):
+        if score < MIN_QUALITY_SCORE or confirmations < len(required_checks):
             continue
         if sector_relative_strength is not None:
             aligned = sector_relative_strength > 0 if side == "LONG" else sector_relative_strength < 0
@@ -198,5 +176,13 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
 
 
 def best_signal(candidates):
+    """Select one strongest stock candidate using the same rank as the app."""
     valid = [x for x in (candidates or []) if isinstance(x, dict)]
-    return sorted(valid, key=lambda x: (x.get("score", 0), x.get("risk_reward", 0)), reverse=True)[0] if valid else None
+    return max(
+        valid,
+        key=lambda x: (
+            float(x.get("rank_score", 0) or 0),
+            float(x.get("score", 0) or 0),
+            float(x.get("risk_reward", 0) or 0),
+        ),
+    ) if valid else None

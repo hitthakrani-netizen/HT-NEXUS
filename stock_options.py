@@ -1,25 +1,35 @@
 """Read-only Dhan stock option-chain screening for HT NEXUS."""
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def scan_stock_option_chain(client, symbol, security_id, bias=None):
-    """Return liquid CE/PE candidates and transparent premium risk levels."""
+def scan_stock_option_chain(client, symbol, security_id, bias=None, strategy="BTST"):
+    """Return a liquid contract whose expiry survives the intended holding window."""
+    strategy = str(strategy).upper()
+    if strategy not in {"BTST", "SWING"}:
+        raise ValueError("Only BTST and SWING option validation is supported.")
     expiries = client.option_expiries(security_id, "NSE_EQ")
     today = datetime.now(IST).date()
+    # Never select an option expiring today or on the next calendar day for an overnight BTST position.
+    # A Swing setup can remain open for up to three trading sessions, so keep
+    # at least six calendar days to expiry; if none exists, do not force a contract.
+    minimum_expiry = today + timedelta(days=2 if strategy == "BTST" else 6)
     valid = []
     for value in expiries:
         try:
             expiry = datetime.strptime(str(value), "%Y-%m-%d").date()
-            if expiry >= today:
+            if expiry >= minimum_expiry:
                 valid.append(expiry)
         except ValueError:
             continue
     if not valid:
-        raise ValueError(f"{symbol}: no active stock-option expiry from Dhan; verify F&O eligibility and underlying ID.")
+        raise ValueError(
+            f"{symbol}: no stock-option expiry remains beyond the {strategy} holding window; "
+            "refusing a same-day/near-expiry contract."
+        )
     expiry = min(valid).isoformat()
     # Dhan Option Chain endpoint is limited to one request per 3 seconds.
     # Expiry-list lookup is performed immediately before this; leave a safe gap.
