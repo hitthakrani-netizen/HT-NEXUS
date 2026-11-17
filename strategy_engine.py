@@ -198,5 +198,13 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
 
 
 def best_signal(candidates):
+    """Select one strongest stock candidate using the same rank as the app."""
     valid = [x for x in (candidates or []) if isinstance(x, dict)]
-    return sorted(valid, key=lambda x: (x.get("score", 0), x.get("risk_reward", 0)), reverse=True)[0] if valid else None
+    return max(
+        valid,
+        key=lambda x: (
+            float(x.get("rank_score", 0) or 0),
+            float(x.get("score", 0) or 0),
+            float(x.get("risk_reward", 0) or 0),
+        ),
+    ) if valid else None
