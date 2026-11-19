@@ -232,6 +232,12 @@ def diagnose_symbol(intraday, daily, strategy="BTST"):
                 "Strong candle body/close": bool(checks["strong_candle"]),
                 "Breakout / breakdown": bool(checks["breakout"]),
                 "Completed 15m trend + volume": bool(checks["mtf"]),
+                "ATR / entry valid": bool(
+                    np.isfinite(float(checks["last"].atr14))
+                    and float(checks["last"].atr14) > 0
+                    and np.isfinite(float(checks["last"].close))
+                    and float(checks["last"].close) > 0
+                ),
             })
             if strategy == "BTST":
                 session = intraday.loc[
