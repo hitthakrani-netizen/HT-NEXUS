@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
 from market_data import DhanDataClient, generate_access_token, parse_universe
-from strategy_engine import evaluate_symbol
+from strategy_engine import evaluate_symbol, diagnose_symbol
 from nse_confirmation import confirm_stock_with_nse
 from backtest import run_backtest
 from stock_options import scan_stock_option_chain
@@ -294,10 +294,13 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                             sig["score"] = min(100.0, float(sig.get("score",0)) + 5.0)
                             sig["reasons"] += "; TradingView: " + tv_check.get("reason","")
                     if sig is None and diagnostic["Status"] == "Data OK":
+                        details = diagnose_symbol(intra, daily, strategy=strategy)
+                        diagnostic.update(details)
                         diagnostic["Status"] = (
-                            "No setup: one or more strict stock checks failed "
-                            "(daily trend/RSI, intraday EMA, RSI+MACD, VWAP, 1.5x volume, "
-                            "strong candle, breakout, 15m confirmation, BTST closing quality or score >=85)."
+                            "No setup: " + details.get(
+                                "Best-side diagnostic",
+                                "one or more stock confirmation checks did not pass."
+                            )
                         )
                     if sig:
                         sig["sector"] = item["sector"]
