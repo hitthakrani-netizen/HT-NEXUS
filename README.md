@@ -76,7 +76,7 @@ Long/short candidates require:
 - NSE-session-aligned, fully completed 15-minute confirmation (09:15 IST session anchor; partial 15-minute bars are excluded).
 - False-breakout guard: close beyond prior range and limited wick retracement.
 - ATR-based stop at 1.5 ATR and target at 2.5 ATR (nominal 1:1.67 before costs); backtest default risk is 0.5% of equity per trade.
-- NSE public Most Active Underlying, Volume Gainers and OI Spurts must provide at least two independent stock-level confirmations with price direction aligned to the Dhan stock signal.
+- Matched NSE public Most Active Underlying, Volume Gainers and OI Spurts rows provide supplementary stock-level corroboration and a ranking bonus when aligned; explicit conflicting price direction or non-positive matched OI rejects a candidate. Missing public rows are neutral, not a positive confirmation.
 - NIFTY/index regime is not fetched or required in the stock scan.
 - Only the highest-ranked stock candidate is displayed; a final trade additionally requires a liquid matching Dhan CALL/PUT contract. Otherwise the app says NO TRADE.
 
