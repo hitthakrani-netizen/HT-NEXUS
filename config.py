@@ -20,8 +20,8 @@ TIMEZONE = ZoneInfo("Asia/Kolkata")
 MARKET_OPEN = time(9, 15)
 MARKET_CLOSE = time(15, 30)
 
-# BTST scanning window: 3:15 PM to 3:29 PM
-BTST_SCAN_START = time(15, 15)
+# BTST scanning window: start after the 3:15 PM one-minute candle closes
+BTST_SCAN_START = time(15, 16)
 BTST_SCAN_END = time(15, 29)
 
 # Swing holding period

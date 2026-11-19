@@ -11,6 +11,29 @@ BTST_START, BTST_END = time(15, 16), time(15, 29)
 MIN_QUALITY_SCORE = 85.0
 
 
+def _completed_15m_bars(intraday: pd.DataFrame) -> pd.DataFrame:
+    """Return only fully closed 15-minute bars aligned to the NSE 09:15 session open.
+
+    Dhan intraday timestamps label candle starts. A base candle is complete at
+    its start timestamp plus the observed base interval; a 15m bar is usable
+    only when its own start plus 15 minutes is no later than that boundary.
+    """
+    if intraday is None or intraday.empty:
+        return pd.DataFrame()
+    if not isinstance(intraday.index, pd.DatetimeIndex):
+        raise TypeError("15-minute confirmation requires a DatetimeIndex.")
+    source = intraday.sort_index()
+    fifteen = resample_ohlcv(source, "15min")
+    steps = source.index.to_series().diff().dropna()
+    steps = steps[(steps > pd.Timedelta(0)) & (steps <= pd.Timedelta(minutes=30))]
+    base_step = steps.median() if not steps.empty else pd.Timedelta(minutes=1)
+    if pd.isna(base_step) or base_step <= pd.Timedelta(0):
+        base_step = pd.Timedelta(minutes=1)
+    completed_until = source.index[-1] + base_step
+    completed_mask = (fifteen.index + pd.Timedelta(minutes=15)) <= completed_until
+    return fifteen.loc[completed_mask]
+
+
 def _intraday_checks(intraday: pd.DataFrame, side: str):
     x = add_indicators(intraday)
     if len(x) < 220:
@@ -33,18 +56,7 @@ def _intraday_checks(intraday: pd.DataFrame, side: str):
     body_pct = abs(float(last.close) - float(last.open)) / rng
     close_location = (float(last.close) - float(last.low)) / rng
     strong_candle = bool(body_pct >= 0.60 and (close_location >= 0.80 if side == "LONG" else close_location <= 0.20))
-    fifteen = resample_ohlcv(intraday, "15min")
-    # Resampling uses right-labelled candle-end timestamps. Keep only 15m bars
-    # whose close time is no later than the end of the latest completed base candle.
-    try:
-        steps = intraday.index.to_series().diff().dropna()
-        base_step = steps[steps <= pd.Timedelta(minutes=30)].median()
-        if pd.isna(base_step) or base_step <= pd.Timedelta(0):
-            base_step = pd.Timedelta(minutes=1)
-        completed_until = (intraday.index[-1] + base_step).floor("15min")
-        fifteen = fifteen.loc[fifteen.index <= completed_until]
-    except Exception:
-        fifteen = fifteen.iloc[:-1] if len(fifteen) else fifteen
+    fifteen = _completed_15m_bars(intraday)
     fifteen = add_indicators(fifteen) if len(fifteen) else fifteen
     mtf = False
     if len(fifteen) >= 55:
@@ -173,6 +185,102 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
             "signal_time": str(intraday.index[-1]),
         })
     return max(candidates, key=lambda s: (s.get("rank_score", 0), s["score"], s["risk_reward"])) if candidates else None
+
+
+def diagnose_symbol(intraday, daily, strategy="BTST"):
+    """Explain the strongest-side blockers when a stock does not qualify.
+
+    This is diagnostic-only: it never changes signal eligibility or lowers a
+    confirmation threshold.
+    """
+    strategy = str(strategy).upper()
+    if strategy not in {"BTST", "SWING"}:
+        raise ValueError("Only BTST and SWING strategies are supported.")
+    if intraday is None or daily is None:
+        return {"Best-side diagnostic": "Market-data frame missing."}
+    if len(intraday) < 220 or len(daily) < 205:
+        return {
+            "Best-side diagnostic": (
+                f"Insufficient history: need 220 intraday / 205 daily; "
+                f"received {len(intraday)} / {len(daily)}."
+            )
+        }
+
+    d = add_indicators(daily)
+    day = d.iloc[-1]
+    side_results = {}
+    for side in ("LONG", "SHORT"):
+        if side == "LONG":
+            daily_trend = bool(day.close > day.ema20 > day.ema50 > day.ema200)
+            daily_rsi = bool(50 <= day.rsi14 <= 75)
+        else:
+            daily_trend = bool(day.close < day.ema20 < day.ema50 < day.ema200)
+            daily_rsi = bool(25 <= day.rsi14 <= 50)
+        checks = _intraday_checks(intraday, side)
+        flags = {
+            "Daily EMA alignment": daily_trend,
+            "Daily RSI range": daily_rsi,
+        }
+        if checks is None:
+            flags["Intraday history/indicators"] = False
+        else:
+            flags.update({
+                "Intraday EMA trend": bool(checks["trend"]),
+                "RSI + MACD": bool(checks["momentum"]),
+                "VWAP direction": bool(checks["vwap"]),
+                "Relative volume >= 1.5x": bool(checks["volume"]),
+                "Strong candle body/close": bool(checks["strong_candle"]),
+                "Breakout / breakdown": bool(checks["breakout"]),
+                "Completed 15m trend + volume": bool(checks["mtf"]),
+                "ATR / entry valid": bool(
+                    np.isfinite(float(checks["last"].atr14))
+                    and float(checks["last"].atr14) > 0
+                    and np.isfinite(float(checks["last"].close))
+                    and float(checks["last"].close) > 0
+                ),
+            })
+            if strategy == "BTST":
+                session = intraday.loc[
+                    [idx.date() == intraday.index[-1].date() for idx in intraday.index]
+                ]
+                if session.empty:
+                    close_quality = False
+                else:
+                    session_high = float(session.high.max())
+                    session_low = float(session.low.min())
+                    session_close = float(session.close.iloc[-1])
+                    session_range = max(session_high - session_low, 1e-9)
+                    close_location = (session_close - session_low) / session_range
+                    vwap_value = float(checks["last"].vwap)
+                    vwap_extension = (
+                        abs((session_close / vwap_value - 1) * 100)
+                        if pd.notna(vwap_value) and vwap_value > 0 else 999.0
+                    )
+                    directional_close = close_location if side == "LONG" else 1.0 - close_location
+                    close_quality = bool(directional_close >= 0.50 and vwap_extension <= 4.0)
+                flags["BTST closing quality"] = close_quality
+
+        failures = [name for name, passed in flags.items() if not passed]
+        passed_count = len(flags) - len(failures)
+        side_results[side] = {
+            "passed": passed_count,
+            "total": len(flags),
+            "failures": failures,
+        }
+
+    best_side = max(side_results, key=lambda side: side_results[side]["passed"])
+    best = side_results[best_side]
+    blocker_text = ", ".join(best["failures"]) if best["failures"] else "none found"
+    return {
+        "LONG checks": f'{side_results["LONG"]["passed"]}/{side_results["LONG"]["total"]} PASS',
+        "LONG failed filters": ", ".join(side_results["LONG"]["failures"]) or "None",
+        "SHORT checks": f'{side_results["SHORT"]["passed"]}/{side_results["SHORT"]["total"]} PASS',
+        "SHORT failed filters": ", ".join(side_results["SHORT"]["failures"]) or "None",
+        "Best-side diagnostic": (
+            f"{best_side}: {best['passed']}/{best['total']} checks pass; "
+            f"remaining blockers: {blocker_text}"
+        ),
+    }
 
 
 def best_signal(candidates):

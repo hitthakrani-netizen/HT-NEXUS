@@ -96,11 +96,13 @@ def add_indicators(df: pd.DataFrame, breakout_lookback: int = 20) -> pd.DataFram
 
 
 def resample_ohlcv(df: pd.DataFrame, timeframe: str = "15min") -> pd.DataFrame:
-    """Resample intraday OHLCV; timestamps are treated as candle-start times."""
+    """Resample NSE-session-aligned OHLCV; each bar starts on a 09:15-anchored boundary."""
     out = _validate_frame(df)
     if not isinstance(out.index, pd.DatetimeIndex):
         raise TypeError("Resampling requires a DatetimeIndex.")
-    result = out.resample(timeframe, label="right", closed="right", origin="start_day").agg({
+    result = out.resample(
+        timeframe, label="left", closed="left", origin="start_day", offset="9h15min"
+    ).agg({
         "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"
     })
     return result.dropna(subset=["open", "high", "low", "close"])

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
 from market_data import DhanDataClient, generate_access_token, parse_universe
-from strategy_engine import evaluate_symbol
+from strategy_engine import evaluate_symbol, diagnose_symbol
 from nse_confirmation import confirm_stock_with_nse
 from backtest import run_backtest
 from stock_options import scan_stock_option_chain
@@ -204,6 +204,8 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
 
             def scan_one_stock(item):
                 """Fetch one stock's candles and evaluate it in an isolated HTTP session."""
+                intra = pd.DataFrame()
+                daily = pd.DataFrame()
                 try:
                     worker_client = DhanDataClient(client.client_id, client.access_token)
                     request_end = datetime.now(IST).replace(tzinfo=None)
@@ -294,10 +296,13 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                             sig["score"] = min(100.0, float(sig.get("score",0)) + 5.0)
                             sig["reasons"] += "; TradingView: " + tv_check.get("reason","")
                     if sig is None and diagnostic["Status"] == "Data OK":
+                        details = diagnose_symbol(intra, daily, strategy=strategy)
+                        diagnostic.update(details)
                         diagnostic["Status"] = (
-                            "No setup: one or more strict stock checks failed "
-                            "(daily trend/RSI, intraday EMA, RSI+MACD, VWAP, 1.5x volume, "
-                            "strong candle, breakout, 15m confirmation, BTST closing quality or score >=85)."
+                            "No setup: " + details.get(
+                                "Best-side diagnostic",
+                                "one or more stock confirmation checks did not pass."
+                            )
                         )
                     if sig:
                         sig["sector"] = item["sector"]
@@ -309,8 +314,10 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                     return diagnostic, sig
                 except Exception as exc:
                     return {
-                        "Stock": item.get("symbol","UNKNOWN"), "Intraday candles": 0,
-                        "Daily candles": 0, "Status": str(exc)[:500]
+                        "Stock": item.get("symbol","UNKNOWN"),
+                        "Intraday candles": len(intra),
+                        "Daily candles": len(daily),
+                        "Status": f"SCAN ERROR: {type(exc).__name__}: {str(exc)[:450]}"
                     }, None
 
             # Four isolated workers overlap network latency; market_data.py globally
@@ -426,17 +433,20 @@ if "stock_signals" in st.session_state and st.session_state.get("stock_signals_s
         st.caption("Only BTST and Swing stock strategies are scanned. NIFTY is not a required stock filter. No auto orders.")
     else:
         diagnostics = st.session_state.get("stock_diagnostics", [])
-        all_data_failed = bool(diagnostics) and all(
-            int(d.get("Intraday candles", 0) or 0) == 0
-            and int(d.get("Daily candles", 0) or 0) == 0
-            and str(d.get("Status", "")).startswith(("Dhan rejected", "Network error", "Dhan HTTP", "Dhan API"))
-            for d in diagnostics
-        )
+        scan_errors = [
+            d for d in diagnostics
+            if str(d.get("Status", "")).startswith(
+                ("SCAN ERROR:", "Dhan rejected", "Network error", "Dhan HTTP", "Dhan API")
+            )
+        ]
+        all_data_failed = bool(diagnostics) and len(scan_errors) == len(diagnostics)
         all_insufficient = bool(diagnostics) and all(str(d.get("Status", "")).startswith("Insufficient history") for d in diagnostics)
         if all_data_failed:
-            st.error("DATA ERROR — Dhan rejected the market-data requests for every stock. No strategy confirmation was possible. This is NOT a genuine NO TRADE result. Check the full per-stock error below before relying on this scan.")
+            st.error("DATA / SCAN ERROR — every stock worker failed before a complete technical evaluation. This is NOT a genuine NO TRADE result. Check the per-stock error details below.")
+        elif scan_errors:
+            st.warning(f"INCOMPLETE SCAN — {len(scan_errors)} of {len(diagnostics)} stock workers had data/API/processing errors. This result is NOT a verified NO TRADE; review the per-stock errors below.")
         elif all_insufficient:
-            st.warning("INSUFFICIENT DATA — one or more required candle histories are missing for every scanned stock. This is NOT a genuine NO TRADE result. Check the candle counts below.")
+            st.warning("INSUFFICIENT DATA — required candle histories were missing for every scanned stock. This is NOT a genuine NO TRADE result. Check the candle counts below.")
         else:
             st.warning("No stock passed the confirmation rules in this scan. This is a genuine NO TRADE result, not an index signal.")
     if st.session_state.get("stock_diagnostics"):
