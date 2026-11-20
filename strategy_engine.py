@@ -8,7 +8,43 @@ from indicators import add_indicators, resample_ohlcv
 
 IST = ZoneInfo("Asia/Kolkata")
 BTST_START, BTST_END = time(15, 16), time(15, 29)
-MIN_QUALITY_SCORE = 85.0
+MIN_QUALITY_SCORE = 80.0
+MIN_CONFIRMATIONS = 4
+
+CONFIRMATION_WEIGHTS = {
+    "RSI + MACD": ("momentum", 10.0),
+    "VWAP": ("vwap", 10.0),
+    "Relative volume >= 1.5x": ("volume", 20.0),
+    "Strong candle body/close": ("strong_candle", 10.0),
+    "Breakout / breakdown": ("breakout", 15.0),
+    "15m trend + volume": ("mtf", 5.0),
+}
+
+
+def _score_confirmation_checks(checks: dict) -> tuple[dict, float, int, bool]:
+    """Score six confirmations without making every indicator a hard gate.
+
+    The daily EMA/RSI direction and intraday EMA trend remain mandatory in
+    evaluate_symbol. A candidate then needs at least four of six confirmations,
+    a score of 80/100, at least one volume/breakout anchor, and at least one
+    momentum/VWAP confirmation. This preserves strong multi-factor evidence
+    while avoiding the previous accidental requirement that all six pass.
+    """
+    points = {
+        label: weight if bool(checks.get(key, False)) else 0.0
+        for label, (key, weight) in CONFIRMATION_WEIGHTS.items()
+    }
+    passed = sum(bool(checks.get(key, False)) for key, _ in CONFIRMATION_WEIGHTS.values())
+    score = 30.0 + sum(points.values())  # daily trend + intraday EMA trend
+    anchor_ok = bool(checks.get("volume") or checks.get("breakout"))
+    direction_ok = bool(checks.get("momentum") or checks.get("vwap"))
+    qualified = (
+        passed >= MIN_CONFIRMATIONS
+        and score >= MIN_QUALITY_SCORE
+        and anchor_ok
+        and direction_ok
+    )
+    return points, score, passed, qualified
 
 
 def _completed_15m_bars(intraday: pd.DataFrame) -> pd.DataFrame:
@@ -98,20 +134,8 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
         last = checks["last"]
         # Fixed, transparent weights; missing/weak confirmations lower score rather than
         # silently disqualifying every otherwise valid trend setup.
-        points = {
-            "Daily trend": 20.0,
-            "Intraday EMA trend": 10.0,
-            "RSI + MACD": 10.0 if checks["momentum"] else 0.0,
-            "VWAP": 10.0 if checks["vwap"] else 0.0,
-            "Relative volume >= 1.5x": 20.0 if checks["volume"] else 0.0,
-            "Strong candle body/close": 10.0 if checks["strong_candle"] else 0.0,
-            "Breakout / breakdown": 15.0 if checks["breakout"] else 0.0,
-            "15m trend + volume": 5.0 if checks["mtf"] else 0.0,
-        }
-        score = sum(points.values())
-        required_checks = ("momentum", "vwap", "volume", "strong_candle", "breakout", "mtf")
-        confirmations = sum(bool(checks[k]) for k in required_checks)
-        if not all(bool(checks[k]) for k in required_checks):
+        points, score, confirmations, confluence_qualified = _score_confirmation_checks(checks)
+        if not confluence_qualified:
             continue
         btst_quality = {}
         if strategy == "BTST":
@@ -149,7 +173,7 @@ def evaluate_symbol(symbol, intraday, daily, regime, strategy="BTST", sector_rel
                 if weakness_location < .50 or vwap_extension_pct > 4.0:
                     continue
         score = min(100.0, score)
-        if score < MIN_QUALITY_SCORE or confirmations < len(required_checks):
+        if score < MIN_QUALITY_SCORE:
             continue
         if sector_relative_strength is not None:
             aligned = sector_relative_strength > 0 if side == "LONG" else sector_relative_strength < 0
@@ -224,6 +248,7 @@ def diagnose_symbol(intraday, daily, strategy="BTST"):
         if checks is None:
             flags["Intraday history/indicators"] = False
         else:
+            points, confluence_score, confluence_count, confluence_ok = _score_confirmation_checks(checks)
             flags.update({
                 "Intraday EMA trend": bool(checks["trend"]),
                 "RSI + MACD": bool(checks["momentum"]),
@@ -232,6 +257,9 @@ def diagnose_symbol(intraday, daily, strategy="BTST"):
                 "Strong candle body/close": bool(checks["strong_candle"]),
                 "Breakout / breakdown": bool(checks["breakout"]),
                 "Completed 15m trend + volume": bool(checks["mtf"]),
+                "Weighted confluence >= 80 and 4/6": bool(confluence_ok),
+                "Volume or breakout anchor": bool(checks["volume"] or checks["breakout"]),
+                "Momentum or VWAP confirmation": bool(checks["momentum"] or checks["vwap"]),
                 "ATR / entry valid": bool(
                     np.isfinite(float(checks["last"].atr14))
                     and float(checks["last"].atr14) > 0
@@ -266,6 +294,9 @@ def diagnose_symbol(intraday, daily, strategy="BTST"):
             "passed": passed_count,
             "total": len(flags),
             "failures": failures,
+            "confluence_score": round(confluence_score, 1) if checks is not None else 0.0,
+            "confluence_count": confluence_count if checks is not None else 0,
+            "confluence_ok": confluence_ok if checks is not None else False,
         }
 
     best_side = max(side_results, key=lambda side: side_results[side]["passed"])
@@ -273,8 +304,10 @@ def diagnose_symbol(intraday, daily, strategy="BTST"):
     blocker_text = ", ".join(best["failures"]) if best["failures"] else "none found"
     return {
         "LONG checks": f'{side_results["LONG"]["passed"]}/{side_results["LONG"]["total"]} PASS',
+        "LONG confluence": f'{side_results["LONG"]["confluence_score"]}/100; {side_results["LONG"]["confluence_count"]}/6; {"QUALIFIED" if side_results["LONG"]["confluence_ok"] else "NOT QUALIFIED"}',
         "LONG failed filters": ", ".join(side_results["LONG"]["failures"]) or "None",
         "SHORT checks": f'{side_results["SHORT"]["passed"]}/{side_results["SHORT"]["total"]} PASS',
+        "SHORT confluence": f'{side_results["SHORT"]["confluence_score"]}/100; {side_results["SHORT"]["confluence_count"]}/6; {"QUALIFIED" if side_results["SHORT"]["confluence_ok"] else "NOT QUALIFIED"}',
         "SHORT failed filters": ", ".join(side_results["SHORT"]["failures"]) or "None",
         "Best-side diagnostic": (
             f"{best_side}: {best['passed']}/{best['total']} checks pass; "
