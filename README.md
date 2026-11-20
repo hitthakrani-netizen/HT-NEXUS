@@ -68,13 +68,13 @@ This project uses DhanHQ API v2:
 Data API access/subscription and token permissions are separate from merely having a Dhan trading account. Confirm the current plan, access token validity, API rate limits and instrument master in Dhan's official portal/docs. Historical intraday requests are split into windows of at most 89 days by this client to stay within documented request-window limits.
 
 ## Strategy logic (initial research rules, not validated edge)
-Long/short candidates require:
-- EMA20/EMA50 alignment; daily EMA20/EMA50 alignment.
-- RSI and MACD direction confirmation.
-- Price relative to session VWAP.
-- 20-bar breakout/breakdown with volume at least 1.5x 20-bar average.
-- NSE-session-aligned, fully completed 15-minute confirmation (09:15 IST session anchor; partial 15-minute bars are excluded).
-- False-breakout guard: close beyond prior range and limited wick retracement.
+Long/short candidates use these mandatory gates:
+- At least 205 daily candles and 220 intraday candles, valid positive ATR/entry, daily EMA20/EMA50/EMA200 directional alignment and a side-appropriate daily RSI range.
+- Intraday EMA20/EMA50 trend alignment.
+- NIFTY/index regime is not fetched or required for stock eligibility.
+
+The following six independent confirmations are scored rather than all being hard gates: RSI + MACD (10 points), VWAP direction (10), relative volume >=1.5x (20), strong candle body/close (10), breakout/breakdown with wick guard (15), and completed NSE-session-aligned 15-minute trend + volume (5). A candidate must score at least 80/100, pass at least four of the six confirmations, include at least one volume/breakout anchor and at least one momentum/VWAP confirmation. This is a quality/confluence score, not a probability of profit. BTST still needs the same stock and direction in both the 15:00–15:14 shortlist and the completed 15:15+ confirmation, plus fresh candle and closing-quality checks. Dhan option-chain liquidity/expiry validation remains mandatory for a final trade.
+- NSE-session-aligned, fully completed 15-minute confirmation uses the 09:15 IST session anchor; partial 15-minute bars are excluded.
 - ATR-based stop at 1.5 ATR and target at 2.5 ATR (nominal 1:1.67 before costs); backtest default risk is 0.5% of equity per trade.
 - Matched NSE public Most Active Underlying, Volume Gainers and OI Spurts rows provide supplementary stock-level corroboration and a ranking bonus when aligned; explicit conflicting price direction or non-positive matched OI rejects a candidate. Missing public rows are neutral, not a positive confirmation.
 - NIFTY/index regime is not fetched or required in the stock scan.
