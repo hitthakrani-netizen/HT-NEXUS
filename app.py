@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
 from market_data import DhanDataClient, generate_access_token, parse_universe
-from strategy_engine import evaluate_symbol, diagnose_symbol
+from strategy_engine import evaluate_symbol, diagnose_symbol, validate_btst_confirmation
 from nse_confirmation import confirm_stock_with_nse
 from backtest import run_backtest
 from stock_options import scan_stock_option_chain
@@ -246,30 +246,24 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                                 item["symbol"], pre_history, daily, stock_context,
                                 strategy="BTST", sector_relative_strength=None, enforce_btst_window=False
                             )
-                        if not pre_sig or not sig or pre_sig["side"] != sig["side"]:
-                            diagnostic["Status"] = "Rejected: BTST 3:00–3:14 shortlist and completed 3:15+ stock confirmation did not both pass in the same direction."
+                        try:
+                            latest_ts = pd.Timestamp(intra.index[-1])
+                            scan_end = datetime.now(IST)
+                            if latest_ts.tzinfo is None:
+                                latest_ts = latest_ts.tz_localize(IST)
+                            candle_close_ts = latest_ts + pd.Timedelta(minutes=int(interval))
+                            candle_age = (scan_end - candle_close_ts.to_pydatetime()).total_seconds() / 60
+                        except Exception:
+                            candle_age = 999.0
+                        btst_ok, btst_reason = validate_btst_confirmation(
+                            pre_sig, sig, candle_age, int(interval)
+                        )
+                        if not btst_ok:
+                            diagnostic["Status"] = "Rejected: BTST confirmation — " + btst_reason
                             sig = None
                         else:
-                            try:
-                                latest_ts = pd.Timestamp(intra.index[-1])
-                                scan_end = datetime.now(IST)
-                                if latest_ts.tzinfo is None:
-                                    latest_ts = latest_ts.tz_localize(IST)
-                                candle_close_ts = latest_ts + pd.Timedelta(minutes=int(interval))
-                                candle_age = (scan_end - candle_close_ts.to_pydatetime()).total_seconds() / 60
-                            except Exception:
-                                candle_age = 999.0
-                            rank_ok = float(sig.get("rank_score",0)) >= float(pre_sig.get("rank_score",0)) - 15.0
-                            fresh_ok = 0 <= candle_age <= int(interval) + 7
-                            if not (rank_ok and fresh_ok and float(sig.get("score",0)) >= 85.0):
-                                diagnostic["Status"] = (
-                                    "Rejected: 3:15+ confirmation failed "
-                                    f"(fresh={fresh_ok}, age={candle_age:.1f}m, rank retained={rank_ok})."
-                                )
-                                sig = None
-                            else:
-                                sig["pre_confirmation_rank"] = float(pre_sig.get("rank_score",0))
-                                sig["confirmation_candle_age_min"] = round(candle_age,1)
+                            sig["pre_confirmation_rank"] = float(pre_sig.get("rank_score",0))
+                            sig["confirmation_candle_age_min"] = round(candle_age,1)
                     if sig:
                         nse_check = confirm_stock_with_nse(nse_snapshot, item["symbol"], sig["side"])
                         sig["nse_confirmation"] = nse_check
