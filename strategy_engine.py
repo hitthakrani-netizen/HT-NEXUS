@@ -11,6 +11,58 @@ BTST_START, BTST_END = time(15, 16), time(15, 29)
 MIN_QUALITY_SCORE = 80.0
 MIN_CONFIRMATIONS = 4
 
+
+def validate_btst_confirmation(pre_signal, confirmation_signal, candle_age_min, interval_minutes):
+    """Validate BTST's two-stage same-stock confirmation and report every blocker.
+
+    The final-stage quality floor deliberately reuses MIN_QUALITY_SCORE from
+    evaluate_symbol. A separate hard-coded 85-point gate here would silently
+    override the documented 80-point weighted-confluence threshold.
+    """
+    if not isinstance(pre_signal, dict):
+        return False, "3:00–3:14 shortlist did not qualify."
+    if not isinstance(confirmation_signal, dict):
+        return False, "completed 3:15+ stock confirmation did not qualify."
+
+    failures = []
+    pre_side = str(pre_signal.get("side", "")).upper()
+    final_side = str(confirmation_signal.get("side", "")).upper()
+    if pre_side not in {"LONG", "SHORT"} or final_side != pre_side:
+        failures.append("direction changed between shortlist and final confirmation")
+
+    try:
+        pre_rank = float(pre_signal.get("rank_score", 0) or 0)
+        final_rank = float(confirmation_signal.get("rank_score", 0) or 0)
+        rank_ok = final_rank >= pre_rank - 15.0
+    except (TypeError, ValueError):
+        pre_rank, final_rank, rank_ok = 0.0, 0.0, False
+    if not rank_ok:
+        failures.append("final rank fell more than 15 points below shortlist rank")
+
+    try:
+        score = float(confirmation_signal.get("score", 0) or 0)
+        score_ok = score >= MIN_QUALITY_SCORE
+    except (TypeError, ValueError):
+        score, score_ok = 0.0, False
+    if not score_ok:
+        failures.append(f"final score {score:.1f} is below {MIN_QUALITY_SCORE:.1f}")
+
+    try:
+        age = float(candle_age_min)
+        max_age = int(interval_minutes) + 7
+        fresh_ok = 0 <= age <= max_age
+    except (TypeError, ValueError):
+        age, max_age, fresh_ok = 999.0, int(interval_minutes) + 7, False
+    if not fresh_ok:
+        failures.append(f"confirmation candle age {age:.1f}m is outside 0–{max_age}m")
+
+    if failures:
+        return False, "; ".join(failures)
+    return True, (
+        f"same direction; score {score:.1f}/{MIN_QUALITY_SCORE:.1f}+; "
+        f"rank {final_rank:.1f} vs shortlist {pre_rank:.1f}; candle age {age:.1f}m"
+    )
+
 CONFIRMATION_WEIGHTS = {
     "RSI + MACD": ("momentum", 10.0),
     "VWAP": ("vwap", 10.0),
