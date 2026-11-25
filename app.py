@@ -13,6 +13,8 @@ from stock_options import scan_stock_option_chain
 from nse_market_data import NSEMarketData
 from tradingview_screener import parse_tradingview_csv, confirm_with_tradingview
 from fno_universe import load_nse_stock_fno_universe, UniverseError
+from live_market_data import extract_dhan_nse_eq_quotes, apply_live_quote_to_signal
+from scan_integrity import assess_scan_coverage
 
 IST=ZoneInfo("Asia/Kolkata")
 st.set_page_config(page_title="HT NEXUS", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
@@ -80,7 +82,10 @@ with st.sidebar:
         token=st.text_input("Dhan Access Token", value=_secret_or_env("DHAN_ACCESS_TOKEN"), type="password")
         st.info("For daily automatic login, configure DHAN_PIN and DHAN_TOTP_SECRET once in Streamlit Secrets.")
     strategy=st.selectbox("Strategy",["BTST","SWING"])
-    interval=st.selectbox("Intraday candle interval (minutes)",["1","5","15"],index=0)
+    # BTST's 3:15 confirmation is a one-minute close. Larger bars cannot
+    # close inside the 3:16–3:29 scan window, so keep BTST on 1-minute candles.
+    interval_options = ["1"] if strategy == "BTST" else ["1","5","15"]
+    interval=st.selectbox("Intraday candle interval (minutes)",interval_options,index=0)
     lookback=st.slider("Intraday history (days)",20,90,20)
     daily_lookback=st.slider("Daily history (calendar days)",250,1500,500,step=50)
     capital=st.number_input("Backtest capital (₹)",min_value=10000,value=100000,step=10000)
@@ -171,13 +176,27 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
     # Never leave yesterday's/previous-strategy signal visible if this scan errors or returns NO TRADE.
     for stale_key in ("stock_signals", "stock_signals_strategy", "stock_option_result",
                       "stock_option_error", "scan_duration_sec", "btst_phase_status",
+                      "scan_integrity", "live_nse_eq_quote_fetched_at", "live_nse_eq_quote_count",
                       "nse_scan_snapshot", "nse_scan_errors", "nse_scan_fetched_at",
                       "nse_scan_available"):
         st.session_state.pop(stale_key, None)
     try:
         client=_dhan_client()
         signals=[]; diagnostics=[]; progress=st.progress(0)
-        with st.spinner("Fetching NSE stock activity, volume and OI confirmation, then scanning Dhan candles..."):
+        with st.spinner("Fetching real-time NSE_EQ quotes, NSE public corroboration and Dhan candles..."):
+            # One Dhan marketfeed request screens the complete NSE cash-equity
+            # universe in real time. Dhan documents this endpoint as a snapshot
+            # at request time; public NSE website snapshots remain supplementary.
+            quote_fetch_time = datetime.now(IST)
+            quote_payload = client.quote([item["security_id"] for item in universe], "NSE_EQ")
+            live_quotes, live_quote_errors = extract_dhan_nse_eq_quotes(
+                quote_payload, universe, now=quote_fetch_time
+            )
+            st.session_state["live_nse_eq_quote_fetched_at"] = quote_fetch_time.strftime("%d-%b-%Y %H:%M:%S IST")
+            st.session_state["live_nse_eq_quote_count"] = len(live_quotes)
+            if not live_quotes:
+                examples = "; ".join(f"{k}: {v}" for k, v in list(live_quote_errors.items())[:4])
+                raise ValueError("No fresh NSE_EQ live quotes were available; scan withheld. " + examples)
             # NSE public website snapshots are corroboration only, not a licensed real-time feed.
             nse = NSEMarketData()
             nse_snapshot = {}
@@ -206,6 +225,13 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                 """Fetch one stock's candles and evaluate it in an isolated HTTP session."""
                 intra = pd.DataFrame()
                 daily = pd.DataFrame()
+                quote = live_quotes.get(item["symbol"])
+                if quote is None:
+                    return {
+                        "Stock": item["symbol"], "Intraday candles": 0, "Daily candles": 0,
+                        "Status": "Rejected: no fresh NSE_EQ live quote — "
+                                  + live_quote_errors.get(item["symbol"], "quote missing or stale")
+                    }, None
                 try:
                     worker_client = DhanDataClient(client.client_id, client.access_token)
                     request_end = datetime.now(IST).replace(tzinfo=None)
@@ -300,6 +326,9 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                         )
                     if sig:
                         sig["sector"] = item["sector"]
+                        # Validate the final entry against this stock's live NSE_EQ
+                        # quote after all workers finish, so quote age includes scan time.
+                        sig["_live_quote"] = quote
                         if tv_screener is None:
                             sig["tradingview_confirmation"] = {
                                 "matched": False, "aligned": False, "score": 0,
@@ -325,23 +354,49 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                         signals.append(sig)
                     progress.progress(i / max(len(universe),1))
         scan_finished_at = datetime.now(IST)
-        if strategy == "BTST" and signals:
+        scan_coverage = assess_scan_coverage(diagnostics, expected_count=len(universe))
+        st.session_state["scan_integrity"] = scan_coverage
+        if not scan_coverage["complete"]:
+            # Never publish a "strongest" candidate when a stock worker failed
+            # or lacked enough history; an unscanned stock could rank higher.
+            signals = []
+            diagnostics.append({
+                "Stock": "SCAN INTEGRITY", "Intraday candles": 0, "Daily candles": 0,
+                "Status": "INCOMPLETE SCAN: " + scan_coverage["reason"]
+            })
+        elif signals:
             fresh_signals = []
             for candidate in signals:
-                try:
-                    candidate_ts = pd.Timestamp(candidate.get("signal_time"))
-                    if candidate_ts.tzinfo is None:
-                        candidate_ts = candidate_ts.tz_localize(IST)
-                    candidate_close_ts = candidate_ts + pd.Timedelta(minutes=int(interval))
-                    final_age = (scan_finished_at - candidate_close_ts.to_pydatetime()).total_seconds() / 60
-                except Exception:
-                    final_age = 999.0
-                if 0 <= final_age <= int(interval) + 7:
+                quote = candidate.pop("_live_quote", None)
+                quote_ok, quote_reason = apply_live_quote_to_signal(
+                    candidate, quote, now=scan_finished_at
+                )
+                if not quote_ok:
+                    diagnostics.append({
+                        "Stock": candidate.get("symbol", "UNKNOWN"),
+                        "Intraday candles": 0, "Daily candles": 0,
+                        "Status": "Rejected: live NSE_EQ quote — " + quote_reason
+                    })
+                    continue
+                if strategy == "BTST":
+                    try:
+                        candidate_ts = pd.Timestamp(candidate.get("signal_time"))
+                        if candidate_ts.tzinfo is None:
+                            candidate_ts = candidate_ts.tz_localize(IST)
+                        candidate_close_ts = candidate_ts + pd.Timedelta(minutes=int(interval))
+                        final_age = (scan_finished_at - candidate_close_ts.to_pydatetime()).total_seconds() / 60
+                    except Exception:
+                        final_age = 999.0
+                    if not (0 <= final_age <= int(interval) + 7):
+                        diagnostics.append({
+                            "Stock": candidate.get("symbol", "BTST"),
+                            "Intraday candles": 0, "Daily candles": 0,
+                            "Status": "Rejected after full scan: confirmation candle became stale ("
+                                      + str(round(final_age,1)) + " minutes old)."
+                        })
+                        continue
                     candidate["confirmation_candle_age_min"] = round(final_age,1)
-                    fresh_signals.append(candidate)
-                else:
-                    diagnostics.append({"Stock":candidate.get("symbol","BTST"),"Intraday candles":0,"Daily candles":0,
-                        "Status":"Rejected after full scan: confirmation candle became stale ("+str(round(final_age,1))+" minutes old)."})
+                fresh_signals.append(candidate)
             signals = fresh_signals
         st.session_state["stock_diagnostics"]=diagnostics
         st.session_state.pop("stock_option_result", None)
@@ -390,6 +445,13 @@ if "stock_signals" in st.session_state and st.session_state.get("stock_signals_s
         df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target 1":round(best.get("target1",best["target"]),2),"Target 2":round(best.get("target2",best["target"]),2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Rank Score":best.get("rank_score",0),"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
         st.dataframe(df,use_container_width=True,hide_index=True)
         st.write(best["reasons"])
+        live_quote = best.get("live_quote", {})
+        if live_quote:
+            st.success(
+                f"Dhan real-time NSE_EQ quote PASS • LTP ₹{live_quote['last_price']:.2f} • "
+                f"last trade {live_quote['last_trade_time']} • age {live_quote['quote_age_seconds']:.0f}s • "
+                f"day volume {live_quote['volume']:,} • candle deviation {live_quote['candle_deviation_atr']:.2f} ATR"
+            )
         nsec = best.get("nse_confirmation", {})
         if nsec.get("aligned"):
             st.success("NSE stock corroboration: PASS • " + ", ".join(nsec.get("evidence", [])))
@@ -430,12 +492,19 @@ if "stock_signals" in st.session_state and st.session_state.get("stock_signals_s
         scan_errors = [
             d for d in diagnostics
             if str(d.get("Status", "")).startswith(
-                ("SCAN ERROR:", "Dhan rejected", "Network error", "Dhan HTTP", "Dhan API")
+                ("SCAN ERROR:", "Dhan rejected", "Network error", "Dhan HTTP", "Dhan API", "INCOMPLETE SCAN:")
             )
         ]
         all_data_failed = bool(diagnostics) and len(scan_errors) == len(diagnostics)
         all_insufficient = bool(diagnostics) and all(str(d.get("Status", "")).startswith("Insufficient history") for d in diagnostics)
-        if all_data_failed:
+        integrity = st.session_state.get("scan_integrity", {})
+        if not integrity.get("complete", True):
+            st.error(
+                f"INCOMPLETE SCAN — {integrity.get('processed', 0)}/{integrity.get('expected', 0)} "
+                f"stocks screened; {integrity.get('failed', 0)} data/history failures. "
+                "This is NOT a genuine NO TRADE result. " + integrity.get("reason", "")
+            )
+        elif all_data_failed:
             st.error("DATA / SCAN ERROR — every stock worker failed before a complete technical evaluation. This is NOT a genuine NO TRADE result. Check the per-stock error details below.")
         elif scan_errors:
             st.warning(f"INCOMPLETE SCAN — {len(scan_errors)} of {len(diagnostics)} stock workers had data/API/processing errors. This result is NOT a verified NO TRADE; review the per-stock errors below.")
@@ -451,7 +520,7 @@ if "stock_signals" in st.session_state and st.session_state.get("stock_signals_s
 
 st.divider()
 st.subheader("🏛️ NSE STOCK MARKET CONFIRMATION")
-st.caption("Each one-click scan fetches NSE Most Active Underlying, Volume Gainers and OI Spurts automatically. These are best-effort NSE public website snapshots, not a licensed real-time feed; source data may be delayed or rate-limited.")
+st.caption("The primary live price cross-check is Dhan's real-time NSE_EQ marketfeed snapshot for the full F&O cash-equity universe. NSE Most Active Underlying, Volume Gainers and OI Spurts are supplementary public website snapshots, not a licensed NSE Data & Analytics feed; they may be delayed or rate-limited.")
 if st.session_state.get("nse_scan_fetched_at"):
     st.caption("NSE snapshot fetched: " + st.session_state["nse_scan_fetched_at"])
     snap = st.session_state.get("nse_scan_snapshot", {})
@@ -467,10 +536,10 @@ if st.session_state.get("nse_scan_fetched_at"):
                 st.warning(f"{section}: {error}")
 else:
     st.info("NSE stock confirmation is fetched automatically when ONE-CLICK SCAN is pressed.")
-st.caption("NSE price direction is used only as independent stock-level corroboration. Positive OI change indicates new positioning, not whether buyers or sellers initiated it. Dhan candles determine the stock setup; Dhan option chain determines the actual CALL/PUT contract. NIFTY/index data is not a required stock filter.")
+st.caption("Dhan's real-time NSE_EQ quote validates the completed-candle entry and refreshes entry/SL/targets; public NSE snapshots add independent stock-level corroboration when available. Positive OI change indicates positioning, not buyer/seller identity. NIFTY/index data is not a required stock filter.")
 
 with st.expander("Historical Backtesting"):
-    st.caption("Single-stock historical test; historical performance does not guarantee future results.")
+    st.caption("Single-stock OHLC-only historical test; it does not replay historical NSE public snapshots or Dhan option chains. Historical performance does not guarantee future results.")
     bt_symbol=st.selectbox("Backtest stock",[x["symbol"] for x in universe] or ["RELIANCE"])
     bt_lookback=st.selectbox("Intraday history (calendar days)",[30,60,90],index=2)
     if st.button("Run Backtest"):
