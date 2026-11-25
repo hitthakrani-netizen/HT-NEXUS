@@ -424,6 +424,10 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                     st.session_state["stock_option_result"] = scan_stock_option_chain(client,strongest["symbol"],underlying.get("fno_security_id",underlying["security_id"]),strongest["side"],strategy=strategy)
                 except Exception as option_exc:
                     st.session_state["stock_option_error"] = str(option_exc)
+            else:
+                st.session_state["stock_option_error"] = (
+                    "Selected stock is missing from the current NSE Stock F&O instrument-master mapping."
+                )
         else:
             st.session_state["stock_option_result"] = None
         st.session_state["scan_duration_sec"] = round((datetime.now(IST) - scan_started_at).total_seconds(), 1)
@@ -498,7 +502,10 @@ if "stock_signals" in st.session_state and st.session_state.get("stock_signals_s
         all_data_failed = bool(diagnostics) and len(scan_errors) == len(diagnostics)
         all_insufficient = bool(diagnostics) and all(str(d.get("Status", "")).startswith("Insufficient history") for d in diagnostics)
         integrity = st.session_state.get("scan_integrity", {})
-        if not integrity.get("complete", True):
+        phase = st.session_state.get("btst_phase_status", "NORMAL")
+        if strategy == "BTST" and phase == "OUTSIDE_WINDOW":
+            st.warning("BTST scan was outside the 3:16–3:29 PM IST window. This is not a market NO TRADE result.")
+        elif not integrity.get("complete", True):
             st.error(
                 f"INCOMPLETE SCAN — {integrity.get('processed', 0)}/{integrity.get('expected', 0)} "
                 f"stocks screened; {integrity.get('failed', 0)} data/history failures. "
