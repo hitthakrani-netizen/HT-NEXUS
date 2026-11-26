@@ -114,3 +114,25 @@ def test_swing_refuses_near_expiry_when_no_safe_contract_exists():
         assert False, "expected no safe expiry"
     except ValueError as exc:
         assert "no stock-option expiry remains" in str(exc)
+
+
+def test_stock_option_chain_rejects_call_with_negative_delta(monkeypatch):
+    monkeypatch.setattr("stock_options.time.sleep", lambda _: None)
+    wrong_call = _leg(-0.55)
+    client = FakeDhan({"data": {"last_price": 1000, "oc": {
+        "1000": {"ce": wrong_call, "pe": _leg(-0.55)}
+    }}})
+    result = scan_stock_option_chain(client, "RELIANCE", 2885, "LONG")
+    assert result["calls"] == []
+    assert result["best"] is None
+
+
+def test_stock_option_chain_rejects_put_with_positive_delta(monkeypatch):
+    monkeypatch.setattr("stock_options.time.sleep", lambda _: None)
+    wrong_put = _leg(0.55)
+    client = FakeDhan({"data": {"last_price": 1000, "oc": {
+        "1000": {"ce": _leg(0.55), "pe": wrong_put}
+    }}})
+    result = scan_stock_option_chain(client, "RELIANCE", 2885, "SHORT")
+    assert result["puts"] == []
+    assert result["best"] is None
