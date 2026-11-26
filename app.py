@@ -187,8 +187,12 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
             # One Dhan marketfeed request screens the complete NSE cash-equity
             # universe in real time. Dhan documents this endpoint as a snapshot
             # at request time; public NSE website snapshots remain supplementary.
-            quote_fetch_time = datetime.now(IST)
+            quote_request_started = datetime.now(IST)
             quote_payload = client.quote([item["security_id"] for item in universe], "NSE_EQ")
+            # Validate trade timestamps against response-receipt time, not the
+            # earlier request-start time, to avoid false "future quote" rejects
+            # when the network/API response takes several seconds.
+            quote_fetch_time = datetime.now(IST)
             live_quotes, live_quote_errors = extract_dhan_nse_eq_quotes(
                 quote_payload, universe, now=quote_fetch_time
             )
