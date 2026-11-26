@@ -65,7 +65,11 @@ def scan_stock_option_chain(client, symbol, security_id, bias=None, strategy="BT
             mid = (bid + ask) / 2 if bid > 0 and ask > 0 else 0
             spread = (ask - bid) / mid if mid > 0 and ask >= bid else 999
             depth_ok = int(leg.get("top_bid_quantity", 0) or 0) > 0 and int(leg.get("top_ask_quantity", 0) or 0) > 0
-            if not (bid > 0 and ask >= bid and ltp > 0 and volume > 0 and oi > 0 and depth_ok and spread <= 0.12 and 0.30 <= abs(delta) <= 0.75):
+            # Delta sign must agree with the actual contract type: calls are
+            # positive-delta and puts are negative-delta. Absolute-delta-only
+            # checks can accidentally accept a malformed/mismapped option leg.
+            delta_ok = (0.30 <= delta <= 0.75) if label == "CALL" else (-0.75 <= delta <= -0.30)
+            if not (bid > 0 and ask >= bid and ltp > 0 and volume > 0 and oi > 0 and depth_ok and spread <= 0.12 and delta_ok):
                 continue
             buy = ask
             stop = round(buy * 0.85, 2)
