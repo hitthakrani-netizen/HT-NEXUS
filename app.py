@@ -15,6 +15,7 @@ from tradingview_screener import parse_tradingview_csv, confirm_with_tradingview
 from fno_universe import load_nse_stock_fno_universe, UniverseError
 from live_market_data import extract_dhan_nse_eq_quotes, apply_live_quote_to_signal
 from scan_integrity import assess_scan_coverage
+from signal_ranking import select_strongest_signal
 
 IST=ZoneInfo("Asia/Kolkata")
 st.set_page_config(page_title="HT NEXUS", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
@@ -414,13 +415,16 @@ if st.button("🚀 ONE-CLICK SCAN — STOCK + CALL / PUT",type="primary", disabl
                 diagnostics.append({"Stock":"BTST","Intraday candles":0,"Daily candles":0,"Status":"Run the one-click BTST scan between 3:16 PM and 3:29 PM IST, after the 3:15 candle has closed."})
             else:
                 phase = "CONFIRMED" if signals else "NO_TRADE"
+        # Persist exactly one strongest stock after every stock/quote validation.
+        strongest_signal = select_strongest_signal(signals)
+        signals = [strongest_signal] if strongest_signal is not None else []
         st.session_state["btst_phase_status"] = phase
         st.session_state["stock_signals"] = signals
         st.session_state["stock_signals_strategy"] = strategy
         # One-click flow: validate the selected stock's matching CALL/PUT automatically.
         may_validate_options = bool(signals) and (strategy != "BTST" or phase == "CONFIRMED")
         if may_validate_options:
-            strongest = max(signals,key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
+            strongest = select_strongest_signal(signals)
             underlying = next((x for x in universe if x["symbol"] == strongest["symbol"]), None)
             if underlying:
                 try:
@@ -448,7 +452,7 @@ if "stock_signals" in st.session_state and st.session_state.get("stock_signals_s
         if strategy == "BTST" and phase == "CONFIRMED":
             st.info("BTST stock setup passed the 3:00–3:14 shortlist and fresh 3:15+ confirmation; Dhan option validation is required. NSE public data is supplementary corroboration when available.")
         # Keep exactly one highest-scoring qualifying stock; never mix weaker signals.
-        best=max(signals,key=lambda x:(float(x.get("rank_score",0)),float(x.get("score",0)),float(x.get("risk_reward",0))))
+        best=select_strongest_signal(signals)
         df=pd.DataFrame([{"Stock":best["symbol"],"Strategy":best["strategy"],"Side":best["side"],"Entry":round(best["entry"],2),"Stop Loss":round(best["stop_loss"],2),"Target 1":round(best.get("target1",best["target"]),2),"Target 2":round(best.get("target2",best["target"]),2),"R:R":round(best["risk_reward"],2),"Score":best["score"],"Rank Score":best.get("rank_score",0),"Status":best.get("score_label","WATCHLIST"),"Sector":best.get("sector","")}])
         st.dataframe(df,use_container_width=True,hide_index=True)
         st.write(best["reasons"])
