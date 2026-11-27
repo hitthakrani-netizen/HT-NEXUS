@@ -36,6 +36,7 @@ def test_rejects_stale_or_placeholder_quote_timestamp():
         payload, [{"symbol": "RELIANCE", "security_id": "2885"}], now=now
     )
     assert quotes == {}
+    assert errors["RELIANCE"].startswith("INACTIVE:")
     assert "stale" in errors["RELIANCE"]
 
 
@@ -48,8 +49,9 @@ def test_rejects_zero_volume_and_missing_security_quote():
         now=now,
     )
     assert quotes == {}
+    assert errors["RELIANCE"].startswith("INACTIVE:")
     assert "zero day volume" in errors["RELIANCE"]
-    assert "No NSE_EQ quote" in errors["TCS"]
+    assert errors["TCS"].startswith("DATA GAP:")
 
 
 def test_refreshes_entry_and_risk_levels_from_fresh_live_ltp():
