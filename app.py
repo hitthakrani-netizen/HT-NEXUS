@@ -521,7 +521,18 @@ if "stock_signals" in st.session_state and st.session_state.get("stock_signals_s
         elif all_insufficient:
             st.warning("INSUFFICIENT DATA — required candle histories were missing for every scanned stock. This is NOT a genuine NO TRADE result. Check the candle counts below.")
         else:
-            st.warning("No stock passed the confirmation rules in this scan. This is a genuine NO TRADE result, not an index signal.")
+            inactive_quotes = int(integrity.get("inactive_quotes", 0))
+            insufficient_history = int(integrity.get("insufficient_history", 0))
+            if inactive_quotes > 0 and inactive_quotes == int(integrity.get("expected", -1)):
+                st.warning("NO TRADE — no NSE Stock F&O underlying had a fresh, non-zero-volume quote at scan time.")
+            else:
+                st.warning("No stock passed the confirmation rules in this scan. This is a genuine NO TRADE result, not an index signal.")
+            if inactive_quotes or insufficient_history:
+                st.caption(
+                    f"Eligibility exclusions: {inactive_quotes} stock(s) had stale/zero-volume NSE_EQ quotes; "
+                    f"{insufficient_history} stock(s) lacked the required candle history. "
+                    "These exclusions do not block otherwise complete screening of the remaining eligible stocks."
+                )
     if st.session_state.get("stock_diagnostics"):
         with st.expander("Per-stock data diagnostics"):
             st.dataframe(pd.DataFrame(st.session_state["stock_diagnostics"]),use_container_width=True,hide_index=True)
