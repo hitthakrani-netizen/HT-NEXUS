@@ -79,7 +79,7 @@ def extract_dhan_nse_eq_quotes(
         security_id = str(item.get("security_id", "")).strip()
         raw = segment.get(security_id)
         if not isinstance(raw, dict):
-            errors[symbol] = "No NSE_EQ quote returned for this security ID."
+            errors[symbol] = "DATA GAP: no NSE_EQ quote returned for this security ID."
             continue
         try:
             ltp = float(raw.get("last_price", 0) or 0)
@@ -93,12 +93,12 @@ def extract_dhan_nse_eq_quotes(
             if not isfinite(previous_close) or previous_close <= 0:
                 raise ValueError("NSE_EQ quote previous close is missing or non-positive.")
             if volume <= 0:
-                raise ValueError("NSE_EQ quote has zero day volume.")
+                raise ValueError("INACTIVE: quote has zero day volume.")
             if age < -5:
                 raise ValueError(f"NSE_EQ quote timestamp is in the future ({age:.1f}s).")
             if age > max_age_seconds:
                 raise ValueError(
-                    f"NSE_EQ last trade is stale ({age:.0f}s; maximum {max_age_seconds}s)."
+                    f"INACTIVE: last trade is stale ({age:.0f}s; maximum {max_age_seconds}s)."
                 )
             net_change = float(raw.get("net_change", ltp - previous_close) or 0)
             quotes[symbol] = {
@@ -112,7 +112,8 @@ def extract_dhan_nse_eq_quotes(
                 "quote_age_seconds": round(max(0.0, age), 1),
             }
         except (TypeError, ValueError, OverflowError) as exc:
-            errors[symbol] = str(exc)
+            reason = str(exc)
+            errors[symbol] = reason if reason.startswith("INACTIVE:") else f"DATA ERROR: {reason}"
     return quotes, errors
 
 
